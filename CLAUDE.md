@@ -35,7 +35,8 @@ Everything must run on the Cloudflare **Workers Free plan**. Set by the owner, n
 - D1 `secfin-db` (`4ac76ae1-e986-41ad-9ed6-13220d43564e`, APAC). KV `secfin-cache` (`d56788bcfbd445e48290247e4284db18`).
 - Vectorize `secfin-articles` (1024 dims, cosine). Queue `secfin-ingest`. Workflow `secfin-brief` (class `BriefWorkflow`). AI Gateway `secfin-brief` (logs, 30 requests/minute).
 - Durable Object `LiveFeed` (SQLite, one instance "global"). Browser Run binding `BROWSER`. Analytics SQL binding `ANALYTICS_SQL`. Turnstile widget "secfin-brief ask" (site key in `public/app.js`, secret `TURNSTILE_SECRET`, local copy in `.dev.vars`).
-- Not enabled yet, both need the owner in the dashboard: R2, and Analytics Engine (the `CLICKS` binding is commented out in `wrangler.jsonc` until then; clicks are dropped and the most-read list stays empty).
+- Analytics Engine enabled 2026-11-03 (dataset `secfin_clicks`, binding `CLICKS`).
+- R2 is not enabled and the owner chose to skip it (it may ask for card details). Weekly PDFs stay in KV.
 - Owner decision 2026-11-03: no Zero Trust Access login. Admin routes stay protected by `ADMIN_KEY` only.
 - The old livelife project was retired on 2026-11-03 and all its Cloudflare resources are gone.
 

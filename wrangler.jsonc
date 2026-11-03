@@ -18,9 +18,8 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveFeed"] }],
   // Browser Run Quick Actions (weekly PDF). 10 browser-minutes a day on Free.
   "browser": { "binding": "BROWSER" },
-  // Reader clicks, and the token-free SQL binding that reads them back. Analytics Engine must be
-  // enabled once in the dashboard (Workers > Analytics Engine) before this binding can deploy:
-  // "analytics_engine_datasets": [{ "binding": "CLICKS", "dataset": "secfin_clicks" }],
+  // Reader clicks, and the token-free SQL binding that reads them back (Analytics Engine enabled 2026-11-03).
+  "analytics_engine_datasets": [{ "binding": "CLICKS", "dataset": "secfin_clicks" }],
   "analytics": { "binding": "ANALYTICS_SQL" },
   "d1_databases": [
     {

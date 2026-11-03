@@ -51,6 +51,7 @@ export async function popular(env: Env): Promise<PopularItem[]> {
     if (a) items.push({ url: r.url, title: a.title, source: a.source, category: a.category, clicks: Number(r.clicks) });
     if (items.length >= 5) break;
   }
-  await env.CACHE.put("popular", JSON.stringify(items), { expirationTtl: POPULAR_TTL_SECONDS });
+  // An empty list is not cached: Analytics Engine data lands a minute or so after the click.
+  if (items.length > 0) await env.CACHE.put("popular", JSON.stringify(items), { expirationTtl: POPULAR_TTL_SECONDS });
   return items;
 }
