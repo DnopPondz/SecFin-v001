@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "secfin-brief",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  // webdev account (Workers Free plan only, see CLAUDE.md)
+  "account_id": "80d3023818cd51d00d21cc21c581318a",
+  "observability": { "enabled": true },
+  // Static frontend. Asset requests are served without invoking the Worker.
+  "assets": { "directory": "./public" },
+  "ai": { "binding": "AI" },
+  // Every 30 minutes: fetch the 3 feeds that waited longest. 22:30 UTC = 05:30 Thai time: build the brief.
+  // Workers Free allows 5 Cron Triggers per account; this uses 2. Keep BRIEF_CRON in src/index.ts in sync.
+  "triggers": { "crons": ["*/30 * * * *", "30 22 * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "secfin-db",
+      "database_id": "4ac76ae1-e986-41ad-9ed6-13220d43564e",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "d56788bcfbd445e48290247e4284db18" }],
+  // Per-IP request ceiling (approximate, per Cloudflare location) so nobody can burn the free daily quotas.
+  "ratelimits": [{ "name": "API_LIMITER", "namespace_id": "2001", "simple": { "limit": 60, "period": 60 } }],
+  // A full brief costs about 300 Neurons; 3,000 leaves room for retries and manual runs.
+  // AI_GATEWAY_ID stays empty until a gateway is created in the dashboard (the API token has no AI Gateway permission).
+  "vars": {
+    "DAILY_NEURON_BUDGET": "3000",
+    "AI_GATEWAY_ID": ""
+  }
+}

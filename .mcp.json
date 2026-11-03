@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "cloudflare-bindings": {
+      "type": "http",
+      "url": "https://bindings.mcp.cloudflare.com/mcp",
+      "headers": {
+        "cf-account-id": "80d3023818cd51d00d21cc21c581318a"
+      }
+    },
+    "cloudflare-observability": {
+      "type": "http",
+      "url": "https://observability.mcp.cloudflare.com/mcp",
+      "headers": {
+        "cf-account-id": "80d3023818cd51d00d21cc21c581318a"
+      }
+    },
+    "cloudflare-docs": {
+      "type": "http",
+      "url": "https://docs.mcp.cloudflare.com/mcp"
+    }
+  }
+}

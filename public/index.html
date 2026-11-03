@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SecFin Brief</title>
+  <meta name="description" content="สรุปข่าว IT, Cyber Security และการเงิน ไทยและต่างประเทศ ทุกเช้า">
+  <link rel="alternate" type="application/rss+xml" title="SecFin Brief" href="/rss.xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-row">
+      <div>
+        <h1>SecFin Brief</h1>
+        <p class="date" id="date">กำลังโหลด…</p>
+      </div>
+      <div class="controls">
+        <select id="day" aria-label="เลือกวันที่"></select>
+        <button id="lang" type="button" aria-label="เปลี่ยนภาษา">EN</button>
+      </div>
+    </div>
+    <nav class="wrap tabs" aria-label="หมวดข่าว">
+      <a href="#cyber">Cyber</a>
+      <a href="#it">IT</a>
+      <a href="#finance" data-i18n="finance">การเงิน</a>
+    </nav>
+  </header>
+
+  <main class="wrap" id="main">
+    <section id="cyber" class="section"><h2>Cyber Security</h2><ol class="items"></ol></section>
+    <section id="it" class="section"><h2>IT</h2><ol class="items"></ol></section>
+    <section id="finance" class="section"><h2 data-i18n="financeTitle">การเงิน</h2><ol class="items"></ol></section>
+    <p class="notes" id="notes" hidden></p>
+  </main>
+
+  <footer class="wrap foot">
+    <p data-i18n="footer">สรุปโดย AI จากหัวข้อและเนื้อหาย่อของแหล่งข่าว โปรดอ่านต้นฉบับก่อนตัดสินใจ</p>
+    <p><a href="/rss.xml">RSS</a></p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
