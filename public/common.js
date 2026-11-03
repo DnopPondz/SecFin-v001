@@ -117,16 +117,41 @@
     }
   }
 
-  // Live ticker from the LiveFeed Durable Object.
+  const TICKER_PX_PER_SECOND = 50;
+
+  // Live ticker from the LiveFeed Durable Object. The headlines scroll on their own: the list is
+  // rendered twice and the track slides by half its width, so the loop has no visible seam.
   function startTicker() {
     const box = document.querySelector("#ticker");
     const list = document.querySelector("#ticker-list");
     if (!box || !list) return;
+    const viewport = el("div", { class: "ticker-viewport" });
+    list.replaceWith(viewport);
+    viewport.append(list);
+    let items = [];
     let delay = 2000;
-    const show = (items, fresh) => {
-      for (const it of [...items].reverse()) list.prepend(el("li", fresh ? { class: "fresh" } : {}, link(it.url, `${it.sourceName}: ${it.title}`, "ticker", it.category, it.url)));
-      while (list.children.length > 15) list.lastChild.remove();
-      box.hidden = list.children.length === 0;
+
+    const draw = () => {
+      const lis = (copy) => items.map((it) => {
+        const a = link(it.url, `${it.sourceName}: ${it.title}`, "ticker", it.category, it.url);
+        // The second copy is only there for the loop; keep it out of tab order and screen readers.
+        if (copy) a.tabIndex = -1;
+        return el("li", { class: it.fresh ? "fresh" : null, "aria-hidden": copy ? "true" : null }, a);
+      });
+      list.replaceChildren(...lis(false), ...lis(true));
+      box.hidden = items.length === 0;
+      // Constant speed whatever the number of headlines; restart so new items start from the left.
+      requestAnimationFrame(() => {
+        list.style.setProperty("--ticker-duration", `${Math.max(20, list.scrollWidth / 2 / TICKER_PX_PER_SECOND)}s`);
+        list.style.animation = "none";
+        void list.offsetWidth;
+        list.style.animation = "";
+      });
+    };
+    const show = (incoming, fresh) => {
+      const seen = new Set(incoming.map((it) => it.url));
+      items = [...incoming.map((it) => ({ ...it, fresh })), ...items.filter((it) => !seen.has(it.url))].slice(0, 15);
+      draw();
     };
     const connect = () => {
       const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
@@ -136,7 +161,7 @@
         if (e.data === "pong") return;
         try {
           const msg = JSON.parse(e.data);
-          if (msg.type === "recent") { list.replaceChildren(); show(msg.items.slice(0, 15), false); }
+          if (msg.type === "recent") { items = []; show(msg.items.slice(0, 15), false); }
           if (msg.type === "new") show(msg.items, true);
         } catch {}
       };

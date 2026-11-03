@@ -72,8 +72,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; animation: pulse 2s infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
-.ticker ul { display: flex; gap: 22px; list-style: none; margin: 0; padding: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
-.ticker ul::-webkit-scrollbar { display: none; }
+/* Auto-scrolling headlines: the track holds two copies and slides by half its width. */
+.ticker-viewport {
+  flex: 1; min-width: 0; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+.ticker ul {
+  display: flex; width: max-content; list-style: none; margin: 0; padding: 0; white-space: nowrap;
+  animation: ticker-scroll var(--ticker-duration, 60s) linear infinite;
+}
+.ticker li { padding-right: 36px; }
+.ticker-viewport:hover ul, .ticker-viewport:focus-within ul { animation-play-state: paused; }
+@keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .ticker-viewport { overflow-x: auto; scrollbar-width: none; }
+  .ticker ul { animation: none; }
+  .ticker li[aria-hidden="true"] { display: none; }
+}
 .ticker a { text-decoration: none; color: var(--muted); }
 .ticker a:hover { color: var(--text); }
 .ticker li.fresh a { color: var(--text); font-weight: 500; }

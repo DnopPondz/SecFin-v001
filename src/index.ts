@@ -193,6 +193,8 @@ app.get("/api/admin/screenshot", async (c) => {
     url: new URL(path, c.req.url).toString(),
     viewport: { width, height: 900 },
     gotoOptions: { waitUntil: "networkidle0", timeout: 30_000 },
+    // ?wait=ms delays the capture, e.g. to check that the ticker animation moves.
+    waitForTimeout: Math.min(Math.max(Number(c.req.query("wait")) || 0, 0), 10_000),
     screenshotOptions: { fullPage: c.req.query("full") === "1" },
   });
   return new Response(res.body, { status: res.status, headers: { "Content-Type": res.headers.get("Content-Type") ?? "image/png" } });
