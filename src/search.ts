@@ -1,3 +1,4 @@
+import { BRIEF_RESERVE } from "./ai";
 import { embed } from "./embed";
 import { sourceById } from "./sources";
 
@@ -18,9 +19,9 @@ const MIN_SCORE = 0.45;
 
 // Semantic search over the last 14 days. A query costs a fraction of a Neuron to embed and
 // about 1,024 queried Vectorize dimensions of the 30M free per month.
-export async function search(env: Env, query: string): Promise<SearchHit[]> {
-  const [vector] = await embed(env, [query]);
-  const res = await env.VECTORS.query(vector, { topK: TOP_K, returnMetadata: "none" });
+export async function search(env: Env, query: string, topK = TOP_K): Promise<SearchHit[]> {
+  const [vector] = await embed(env, [query], Date.now(), BRIEF_RESERVE);
+  const res = await env.VECTORS.query(vector, { topK, returnMetadata: "none" });
   const matches = res.matches.filter((m) => m.score >= MIN_SCORE);
   if (matches.length === 0) return [];
   const { results } = await env.DB.prepare(

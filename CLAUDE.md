@@ -34,7 +34,9 @@ Everything must run on the Cloudflare **Workers Free plan**. Set by the owner, n
 - Worker `secfin-brief`, live at https://secfin-brief.webdev-80d.workers.dev. Deploy with `npx wrangler deploy`; credentials come from the gitignored `.env`.
 - D1 `secfin-db` (`4ac76ae1-e986-41ad-9ed6-13220d43564e`, APAC). KV `secfin-cache` (`d56788bcfbd445e48290247e4284db18`).
 - Vectorize `secfin-articles` (1024 dims, cosine). Queue `secfin-ingest`. Workflow `secfin-brief` (class `BriefWorkflow`). AI Gateway `secfin-brief` (logs, 30 requests/minute).
-- R2 is not enabled yet (must be done in the dashboard by the owner).
+- Durable Object `LiveFeed` (SQLite, one instance "global"). Browser Run binding `BROWSER`. Analytics SQL binding `ANALYTICS_SQL`. Turnstile widget "secfin-brief ask" (site key in `public/app.js`, secret `TURNSTILE_SECRET`, local copy in `.dev.vars`).
+- Not enabled yet, both need the owner in the dashboard: R2, and Analytics Engine (the `CLICKS` binding is commented out in `wrangler.jsonc` until then; clicks are dropped and the most-read list stays empty).
+- Owner decision 2026-11-03: no Zero Trust Access login. Admin routes stay protected by `ADMIN_KEY` only.
 - The old livelife project was retired on 2026-11-03 and all its Cloudflare resources are gone.
 
 ## How it works
@@ -43,11 +45,16 @@ Everything must run on the Cloudflare **Workers Free plan**. Set by the owner, n
 - Cron `30 22 * * *` (05:30 Thai) starts `BriefWorkflow` (`src/workflow.ts`): one step per section (`aiSection`, retried twice, falls back to `rawSection`), a CVE step, save, prune. Sections collapse clusters first, so a story counts all sources that carried it in the last 30 h; Gemma 4 26B picks the top 5 in Thai and English and sees the source count.
 - CVE data (CVSS, CISA KEV dates) comes from the NVD API for ids found in the publisher's own text, never from the model; cached in D1 `cves`, at most 5 NVD calls per run (NVD allows 5 per 30 s without a key). The full KEV JSON is too heavy to parse in 10 ms CPU.
 - `GET /api/search?q=` embeds the query and searches Vectorize (14 days of articles), 10 per minute per IP.
+- `POST /api/ask` (Turnstile token required, 3 per minute per IP): retrieves 8 stories from Vectorize and asks Gemma for a cited answer in the question's language (`src/ask.ts`). Only sources the model cited and that exist are returned. About 35 Neurons each.
+- Visitor-triggered AI (search, ask) cannot use the last `BRIEF_RESERVE` (600) Neurons of the daily budget, because the brief runs at 22:30 UTC near the end of the UTC day.
+- Live ticker: after each feed, the queue consumer calls `LiveFeed.publish()` with articles published in the last 6 h; the page connects to `/ws` (hibernatable WebSocket) and gets the last 30.
+- Cron `0 23 * * 6` (Sunday 06:00 Thai): `makeWeeklyPdf` renders the week's top 10 per section (`/weekly.html`) to PDF with `BROWSER.quickAction("pdf")` and stores it in KV (`pdf:<date>`, `pdf:latest`, 60-day TTL) until R2 is enabled. Served at `/weekly.pdf`. About 10 s of the 10 free browser-minutes a day.
+- Clicks: `POST /api/click` writes to Analytics Engine; `/api/popular` reads the week's top links back through the Analytics SQL binding, keeps only URLs that exist in D1 (looked up by id = SHA-256 of the URL), and caches 30 minutes in KV.
 - Every AI call is metered in D1 `ai_usage` and refused past `DAILY_NEURON_BUDGET` (3,000). A full brief costs about 160 Neurons and a day of embeddings well under 100. Without AI the brief falls back to raw headlines.
 - Pruning deletes vectors before rows: Vectorize Free stores 5M dimensions, about 4,800 bge-m3 vectors.
 - The model's picks are mapped back to stored articles by index, so it can never invent a link. Prompts forbid facts not in the snippet; spot-check CVE ids and numbers when changing prompts or models.
 - Sources live in `src/sources.ts`. Do not work around a publisher's block (BleepingComputer returns 403 to Workers, so it was removed).
-- Admin: `POST /api/admin/run?task=ingest|brief` (ingest queues every feed, brief starts the Workflow and returns its id), `GET /api/admin/workflow/:id`, `GET /api/admin/status`, header `x-admin-key` (secret `ADMIN_KEY`, local copy in `.dev.vars`).
+- Admin: `POST /api/admin/run?task=ingest|brief|weekly` (ingest queues every feed, brief starts the Workflow and returns its id, weekly renders the PDF now), `POST /api/admin/ask` (ask without Turnstile, for testing), `GET /api/admin/workflow/:id`, `GET /api/admin/status`, header `x-admin-key` (secret `ADMIN_KEY`, local copy in `.dev.vars`).
 - The Cloudflare observability MCP server is deprecated and fails to parse queue events in the events view; use the calculations view or `npx wrangler tail`.
 
 ## Tests

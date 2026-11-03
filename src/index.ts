@@ -1,15 +1,21 @@
 import { Hono } from "hono";
 import { BudgetExceeded, neuronsUsed } from "./ai";
+import { ask } from "./ask";
 import type { Brief } from "./brief";
+import { popular, recordClick, validClick, type ClickBody } from "./clicks";
 import { enqueueFeeds, handleIngest, type IngestMessage } from "./ingest";
 import { renderRss } from "./rss";
 import { search } from "./search";
 import { thaiDate } from "./time";
+import { verifyTurnstile } from "./turnstile";
+import { loadWeekBriefs, makeWeeklyPdf, renderWeeklyHtml } from "./weekly";
 
 export { BriefWorkflow } from "./workflow";
+export { LiveFeed } from "./live";
 
-// 05:30 Thai time. Must match the second entry of triggers.crons in wrangler.jsonc.
+// Must match triggers.crons in wrangler.jsonc. 05:30 Thai time daily, 06:00 Thai time Sunday.
 const BRIEF_CRON = "30 22 * * *";
+const WEEKLY_CRON = "0 23 * * 6";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -60,6 +66,60 @@ app.get("/api/search", async (c) => {
   }
 });
 
+// Questions cost about 35 Neurons each: Turnstile, 3 per minute per IP, and the brief reserve.
+app.post("/api/ask", async (c) => {
+  const ip = c.req.header("CF-Connecting-IP");
+  const body = (await c.req.json().catch(() => ({}))) as { q?: unknown; token?: unknown };
+  const q = typeof body.q === "string" ? body.q.trim() : "";
+  if (q.length < 5 || q.length > 300) return c.json({ ok: false, error: "คำถามต้องยาว 5 ถึง 300 ตัวอักษร" }, 400);
+  const { success } = await c.env.ASK_LIMITER.limit({ key: ip ?? "unknown" });
+  if (!success) return c.json({ ok: false, error: "ถามถี่เกินไป รอสักครู่แล้วลองใหม่" }, 429);
+  if (!(await verifyTurnstile(c.env, typeof body.token === "string" ? body.token : undefined, ip))) {
+    return c.json({ ok: false, error: "ยืนยันว่าไม่ใช่บอทไม่สำเร็จ ลองใหม่อีกครั้ง" }, 403);
+  }
+  try {
+    return c.json({ ok: true, ...(await ask(c.env, q)) });
+  } catch (err) {
+    if (err instanceof BudgetExceeded) return c.json({ ok: false, error: "วันนี้ใช้โควตา AI ครบแล้ว ลองใหม่พรุ่งนี้" }, 503);
+    throw err;
+  }
+});
+
+// Live headline ticker over a hibernatable WebSocket.
+app.get("/ws", async (c) => {
+  if (c.req.header("Upgrade") !== "websocket") return c.text("Expected WebSocket", 426);
+  return c.env.LIVE.get(c.env.LIVE.idFromName("global")).fetch(c.req.raw);
+});
+
+app.post("/api/click", async (c) => {
+  const click = validClick((await c.req.json().catch(() => ({}))) as ClickBody);
+  if (click) recordClick(c.env, click);
+  return c.body(null, 204);
+});
+
+app.get("/api/popular", async (c) => {
+  try {
+    return c.json(await popular(c.env), 200, { "Cache-Control": "public, max-age=600" });
+  } catch (err) {
+    console.error("popular:", err);
+    return c.json([], 200);
+  }
+});
+
+app.get("/weekly.pdf", async (c) => {
+  const date = await c.env.CACHE.get("pdf:latest");
+  const pdf = date ? await c.env.CACHE.get(`pdf:${date}`, "arrayBuffer") : null;
+  if (!pdf) return c.json({ ok: false, error: "ยังไม่มี PDF สรุปประจำสัปดาห์" }, 404);
+  return c.body(pdf, 200, {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `inline; filename="secfin-weekly-${date}.pdf"`,
+    "Cache-Control": "public, max-age=3600",
+  });
+});
+
+// The HTML the PDF is printed from, useful for checking layout without spending browser time.
+app.get("/weekly.html", async (c) => c.html(renderWeeklyHtml(await loadWeekBriefs(c.env, Date.now()), Date.now())));
+
 app.get("/rss.xml", async (c) => {
   const body = await latestBrief(c.env);
   const brief = body ? (JSON.parse(body) as Brief) : null;
@@ -93,7 +153,16 @@ app.post("/api/admin/run", async (c) => {
   const task = c.req.query("task");
   if (task === "ingest") return c.json({ queued: await enqueueFeeds(c.env) });
   if (task === "brief") return c.json({ workflow: await startBrief(c.env, Date.now()) });
-  return c.json({ ok: false, error: "task must be ingest or brief" }, 400);
+  if (task === "weekly") return c.json(await makeWeeklyPdf(c.env));
+  return c.json({ ok: false, error: "task must be ingest, brief or weekly" }, 400);
+});
+
+// Same as /api/ask without Turnstile, for checking answer quality from a script.
+app.post("/api/admin/ask", async (c) => {
+  if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
+  const { q } = (await c.req.json().catch(() => ({}))) as { q?: string };
+  if (!q) return c.json({ ok: false, error: "q required" }, 400);
+  return c.json(await ask(c.env, q));
 });
 
 app.get("/api/admin/workflow/:id", async (c) => {
@@ -112,6 +181,10 @@ export default {
   async scheduled(controller, env) {
     if (controller.cron === BRIEF_CRON) {
       console.log("brief workflow", await startBrief(env, controller.scheduledTime));
+      return;
+    }
+    if (controller.cron === WEEKLY_CRON) {
+      console.log("weekly pdf", await makeWeeklyPdf(env, controller.scheduledTime));
       return;
     }
     console.log("queued feeds", await enqueueFeeds(env));

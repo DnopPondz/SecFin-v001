@@ -1,7 +1,12 @@
 import { embedPending } from "./cluster";
 import { parseFeed } from "./feed";
+import { sha256 } from "./hash";
+import type { TickerItem } from "./live";
 import { classify } from "./select";
 import { SOURCES, sourceById, type Source } from "./sources";
+
+// Only fresh stories go to the live ticker, not the backlog a feed returns on its first fetch.
+const TICKER_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 const ITEMS_PER_FEED = 20;
 const RETENTION_DAYS = 14;
@@ -45,6 +50,7 @@ export async function ingestOne(env: Env, source: Source, now = Date.now()): Pro
   let status = "ok";
   let count = 0;
   let embedded = 0;
+  let fresh: TickerItem[] = [];
   try {
     const res = await fetch(source.url, {
       headers: { "user-agent": "SecFinBrief/0.1 (personal news digest)", accept: "application/rss+xml, application/atom+xml, application/xml, text/xml" },
@@ -74,9 +80,19 @@ export async function ingestOne(env: Env, source: Source, now = Date.now()): Pro
     if (stmts.length > 0) {
       const out = await env.DB.batch(stmts);
       count = out.reduce((n, r) => n + (r.meta.changes ?? 0), 0);
+      fresh = items
+        .filter((it, i) => (out[i].meta.changes ?? 0) > 0 && now - (it.published || now) <= TICKER_MAX_AGE_MS)
+        .map((it) => ({ title: it.title, url: it.link, sourceName: source.name, category: classify(source.category, it.title, it.summary), published: Math.min(it.published || now, now) }));
     }
   } catch (err) {
     status = String(err instanceof Error ? err.message : err).slice(0, 120);
+  }
+  if (fresh.length > 0) {
+    try {
+      await env.LIVE.get(env.LIVE.idFromName("global")).publish(fresh);
+    } catch (err) {
+      console.error("live publish:", err);
+    }
   }
   // Also picks up articles whose embedding failed on an earlier run.
   try {
@@ -99,9 +115,4 @@ export async function pruneArticles(env: Env, now = Date.now()): Promise<number>
   const out = await env.DB.prepare("DELETE FROM articles WHERE fetched_at < ?").bind(cutoff).run();
   await env.DB.prepare("DELETE FROM cves WHERE checked_at < ?").bind(cutoff).run();
   return out.meta.changes ?? 0;
-}
-
-async function sha256(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

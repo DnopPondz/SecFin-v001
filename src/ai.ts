@@ -35,10 +35,14 @@ export async function addNeurons(env: Env, neurons: number, now: number): Promis
     .run();
 }
 
-// Refuse a call up front when its worst case would cross DAILY_NEURON_BUDGET.
-export async function assertBudget(env: Env, estimate: number, now: number): Promise<void> {
+// Visitor-triggered calls (search, ask) must leave this much for the brief, which runs at
+// 22:30 UTC, near the end of the UTC day the budget is counted in. A brief costs about 160.
+export const BRIEF_RESERVE = 600;
+
+// Refuse a call up front when its worst case would cross DAILY_NEURON_BUDGET minus `reserve`.
+export async function assertBudget(env: Env, estimate: number, now: number, reserve = 0): Promise<void> {
   const budget = Number(env.DAILY_NEURON_BUDGET) || 0;
-  if ((await neuronsUsed(env, now)) + estimate > budget) throw new BudgetExceeded("daily Neuron budget reached");
+  if ((await neuronsUsed(env, now)) + estimate > budget - reserve) throw new BudgetExceeded("daily Neuron budget reached");
 }
 
 export function gatewayOptions(env: Env): AiOptions | undefined {
@@ -46,8 +50,8 @@ export function gatewayOptions(env: Env): AiOptions | undefined {
 }
 
 // One JSON-mode chat call, metered against DAILY_NEURON_BUDGET before it is sent.
-export async function runJson(env: Env, messages: ChatMessage[], schema: object, maxTokens: number, now = Date.now()): Promise<JsonResult> {
-  await assertBudget(env, worstCaseNeurons(messages, maxTokens), now);
+export async function runJson(env: Env, messages: ChatMessage[], schema: object, maxTokens: number, now = Date.now(), reserve = 0): Promise<JsonResult> {
+  await assertBudget(env, worstCaseNeurons(messages, maxTokens), now, reserve);
   const options = gatewayOptions(env);
   const out = (await env.AI.run(
     MODEL as keyof AiModels,

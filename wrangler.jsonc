@@ -10,8 +10,18 @@
   "assets": { "directory": "./public" },
   "ai": { "binding": "AI" },
   // Hourly: queue every feed. 22:30 UTC = 05:30 Thai time: start the brief Workflow.
-  // Workers Free allows 5 Cron Triggers per account; this uses 2. Keep BRIEF_CRON in src/index.ts in sync.
-  "triggers": { "crons": ["0 * * * *", "30 22 * * *"] },
+  // Saturday 23:00 UTC = Sunday 06:00 Thai time: weekly PDF.
+  // Workers Free allows 5 Cron Triggers per account; this uses 3. Keep BRIEF_CRON and WEEKLY_CRON in src/index.ts in sync.
+  "triggers": { "crons": ["0 * * * *", "30 22 * * *", "0 23 * * 6"] },
+  // Live ticker. Workers Free supports SQLite-backed Durable Objects only.
+  "durable_objects": { "bindings": [{ "name": "LIVE", "class_name": "LiveFeed" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveFeed"] }],
+  // Browser Run Quick Actions (weekly PDF). 10 browser-minutes a day on Free.
+  "browser": { "binding": "BROWSER" },
+  // Reader clicks, and the token-free SQL binding that reads them back. Analytics Engine must be
+  // enabled once in the dashboard (Workers > Analytics Engine) before this binding can deploy:
+  // "analytics_engine_datasets": [{ "binding": "CLICKS", "dataset": "secfin_clicks" }],
+  "analytics": { "binding": "ANALYTICS_SQL" },
   "d1_databases": [
     {
       "binding": "DB",
@@ -32,7 +42,8 @@
   // Per-IP request ceilings (approximate, per Cloudflare location) so nobody can burn the free daily quotas.
   "ratelimits": [
     { "name": "API_LIMITER", "namespace_id": "2001", "simple": { "limit": 60, "period": 60 } },
-    { "name": "SEARCH_LIMITER", "namespace_id": "2002", "simple": { "limit": 10, "period": 60 } }
+    { "name": "SEARCH_LIMITER", "namespace_id": "2002", "simple": { "limit": 10, "period": 60 } },
+    { "name": "ASK_LIMITER", "namespace_id": "2003", "simple": { "limit": 3, "period": 60 } }
   ],
   // A full brief costs about 160 Neurons; 3,000 leaves room for retries, embeddings and searches.
   // AI Gateway secfin-brief (created 2026-11-03): request logs plus a 30 requests/minute ceiling.

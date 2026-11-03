@@ -12,10 +12,10 @@ function estimateNeurons(texts: string[]): number {
   return ((chars / 1.5) * NEURONS_PER_M_INPUT) / 1_000_000;
 }
 
-export async function embed(env: Env, texts: string[], now = Date.now()): Promise<number[][]> {
+export async function embed(env: Env, texts: string[], now = Date.now(), reserve = 0): Promise<number[][]> {
   if (texts.length === 0) return [];
   const estimate = estimateNeurons(texts);
-  await assertBudget(env, estimate, now);
+  await assertBudget(env, estimate, now, reserve);
   const out = (await env.AI.run(EMBED_MODEL, { text: texts.map((t) => t.slice(0, MAX_CHARS)) }, gatewayOptions(env))) as { data?: number[][] };
   // bge-m3 does not report token usage, so the estimate is what gets metered.
   await addNeurons(env, estimate, now);

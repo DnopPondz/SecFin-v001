@@ -27,10 +27,16 @@
       <a href="#cyber">Cyber</a>
       <a href="#it">IT</a>
       <a href="#finance" data-i18n="finance">การเงิน</a>
+      <a href="#ask" data-i18n="askTab">ถามข่าว</a>
       <form id="search" class="search" role="search">
         <input id="q" type="search" minlength="2" maxlength="200" data-i18n-placeholder="searchHint" placeholder="ค้นข่าวย้อนหลัง 14 วัน" aria-label="ค้นข่าว">
       </form>
     </nav>
+    <div class="wrap ticker" id="ticker" hidden aria-live="polite">
+      <span class="live-dot" aria-hidden="true"></span>
+      <b data-i18n="live">ล่าสุด</b>
+      <ul id="ticker-list"></ul>
+    </div>
   </header>
 
   <section class="wrap results" id="results" hidden>
@@ -42,14 +48,34 @@
     <section id="cyber" class="section"><h2>Cyber Security</h2><ol class="items"></ol></section>
     <section id="it" class="section"><h2>IT</h2><ol class="items"></ol></section>
     <section id="finance" class="section"><h2 data-i18n="financeTitle">การเงิน</h2><ol class="items"></ol></section>
+
+    <section id="popular-box" class="section" hidden>
+      <h2 data-i18n="popular">อ่านมากสุดสัปดาห์นี้</h2>
+      <ol class="items" id="popular"></ol>
+    </section>
+
+    <section id="ask" class="section">
+      <h2 data-i18n="askTitle">ถามข่าว</h2>
+      <p class="hint" data-i18n="askHint">ถามเกี่ยวกับข่าว 14 วันล่าสุด AI ตอบจากข่าวในคลังเท่านั้นและบอกแหล่งที่มา</p>
+      <form id="ask-form" class="ask-form">
+        <textarea id="ask-q" rows="2" minlength="5" maxlength="300" required></textarea>
+        <div class="ask-row">
+          <div id="turnstile"></div>
+          <button id="ask-btn" type="submit" data-i18n="askBtn">ถาม</button>
+        </div>
+      </form>
+      <div id="answer" class="item answer" hidden></div>
+    </section>
+
     <p class="notes" id="notes" hidden></p>
   </main>
 
   <footer class="wrap foot">
     <p data-i18n="footer">สรุปโดย AI จากหัวข้อและเนื้อหาย่อของแหล่งข่าว โปรดอ่านต้นฉบับก่อนตัดสินใจ</p>
-    <p><a href="/rss.xml">RSS</a></p>
+    <p><a href="/weekly.pdf" data-i18n="weekly">PDF สรุปประจำสัปดาห์</a> · <a href="/rss.xml">RSS</a></p>
   </footer>
 
   <script src="/app.js"></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
 </body>
 </html>
