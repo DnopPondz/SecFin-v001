@@ -11,7 +11,7 @@ export interface BriefParams {
 
 // The daily brief as durable steps: each section retries on its own, a failed section falls
 // back to raw headlines, and a retry never repeats AI calls that already succeeded.
-// Each step gets its own 10 ms CPU budget on Workers Free; about 7 steps a day of the 3,000 allowed.
+// Each step gets its own 10 ms CPU budget on Workers Free; about 8 steps a day of the 3,000 allowed.
 export class BriefWorkflow extends WorkflowEntrypoint<Env, BriefParams> {
   async run(event: WorkflowEvent<BriefParams>, step: WorkflowStep) {
     const now = event.payload.now;
@@ -46,7 +46,17 @@ export class BriefWorkflow extends WorkflowEntrypoint<Env, BriefParams> {
 
     const brief = assembleBrief(now, sections, notes);
     await step.do("save", () => saveBrief(this.env, brief));
+
+    // Detailed write-ups go to the queue once the brief is live: each story fetches the publisher's
+    // page, and a Workflow instance only gets 50 external subrequests in total on Workers Free.
+    // A story that fails leaves its page showing the brief summary.
+    const stories = await step.do("queue stories", async () => {
+      const jobs = CATEGORIES.flatMap((category) => brief.sections[category].map((item) => ({ body: { story: { item, category, now } } })));
+      if (jobs.length > 0) await this.env.INGEST_QUEUE.sendBatch(jobs);
+      return jobs.length;
+    });
+
     await step.do("prune", () => pruneArticles(this.env, now));
-    return { date: brief.date, neurons: brief.neurons, notes };
+    return { date: brief.date, neurons: brief.neurons, notes, stories };
   }
 }

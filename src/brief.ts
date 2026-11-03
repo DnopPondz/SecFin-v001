@@ -7,7 +7,8 @@ import { thaiDate } from "./time";
 
 const ITEMS_PER_SECTION = 5;
 const WINDOW_MS = 30 * 60 * 60 * 1000; // a little over a day, so a late-night story is not lost
-const MAX_TOKENS = 2500;
+// 5 bilingual items run to about 2,500 tokens; Thai is token-heavy, so leave headroom (unused tokens cost nothing).
+const MAX_TOKENS = 4000;
 
 export interface Bilingual {
   th: string;
@@ -15,6 +16,8 @@ export interface Bilingual {
 }
 
 export interface BriefItem {
+  id: string; // article id (SHA-256 of the URL); the story page is /story.html?id=<id>
+  image: string | null; // publisher's lead image URL from the feed
   url: string;
   source: string;
   sourceName: string;
@@ -135,6 +138,8 @@ export function buildMessages(category: Category, candidates: Article[]): ChatMe
 
 function toItem(a: Article, ai?: z.infer<typeof ItemSchema>): BriefItem {
   return {
+    id: a.id,
+    image: a.image ?? null,
     url: a.url,
     source: a.source,
     sourceName: sourceById(a.source)?.name ?? a.source,
@@ -171,7 +176,7 @@ export function mergePicks(candidates: Article[], raw: unknown): BriefItem[] {
 // All recent articles across every section, so a story's coverage counts sources in any section.
 async function candidatesFor(env: Env, category: Category, now: number): Promise<Article[]> {
   const { results } = await env.DB.prepare(
-    "SELECT id, url, source, category, region, lang, title, snippet, published_at, cluster_id FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT 1000",
+    "SELECT id, url, source, category, region, lang, title, snippet, published_at, cluster_id, image FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT 1000",
   )
     .bind(now - WINDOW_MS)
     .all<Article>();

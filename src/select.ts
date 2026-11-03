@@ -11,6 +11,7 @@ export interface Article {
   snippet: string;
   published_at: number;
   cluster_id?: string | null;
+  image?: string | null;
   // Filled by collapseClusters: how many distinct sources carried the story, and which others.
   coverage?: number;
   alsoIn?: string[];

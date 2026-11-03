@@ -6,6 +6,7 @@ export interface FeedItem {
   link: string;
   summary: string;
   published: number; // epoch ms, 0 when the feed gives no usable date
+  image: string | null; // publisher's lead image URL, if the feed carries one
 }
 
 const SNIPPET_CHARS = 300;
@@ -21,9 +22,37 @@ export function parseFeed(xml: string, limit = 20): FeedItem[] {
     const summary = truncate(clean(tag(body, "description") ?? tag(body, "summary") ?? tag(body, "content:encoded") ?? tag(body, "content")), SNIPPET_CHARS);
     const date = tag(body, "pubDate") ?? tag(body, "published") ?? tag(body, "updated") ?? tag(body, "dc:date");
     const published = date ? Date.parse(clean(date)) : NaN;
-    items.push({ title, link, summary, published: Number.isFinite(published) ? published : 0 });
+    items.push({ title, link, summary, published: Number.isFinite(published) ? published : 0, image: imageOf(body) });
   }
   return items;
+}
+
+// Feeds put the lead image in different places; try the explicit ones before the first <img>.
+export function imageOf(body: string): string | null {
+  const attr = (tagRe: RegExp): string | null => {
+    for (const m of body.matchAll(tagRe)) {
+      const attrs = m[1];
+      const url = attrs.match(/\burl=["']([^"']+)["']/)?.[1];
+      const type = attrs.match(/\b(?:type|medium)=["']([^"']+)["']/)?.[1] ?? "image";
+      if (url && /image/i.test(type)) return url;
+    }
+    return null;
+  };
+  const raw =
+    attr(/<media:content\b([^>]*)>/g) ??
+    attr(/<media:thumbnail\b([^>]*)>/g) ??
+    attr(/<enclosure\b([^>]*)>/g) ??
+    // Escaped or CDATA HTML in description/content: decode once, then look for an <img>.
+    decodeEntities(body.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i)?.[1] ??
+    null;
+  return safeImageUrl(raw ? decodeEntities(raw) : null);
+}
+
+// Only plain http(s) URLs of sane length; tracking pixels and data: URIs are dropped.
+export function safeImageUrl(url: string | null | undefined): string | null {
+  if (!url || url.length > 1000 || !/^https?:\/\//i.test(url)) return null;
+  if (/(?:pixel|spacer|1x1|feedburner\.com\/~r)/i.test(url)) return null;
+  return url;
 }
 
 function tag(body: string, name: string): string | undefined {

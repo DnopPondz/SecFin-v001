@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SecFin Brief</title>
+  <script>try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Noto+Serif+Thai:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="wrap topbar">
+      <a class="brand" href="/" style="font-size:1.25rem">SecFin <span>Brief</span></a>
+      <div class="ticker" id="ticker" hidden aria-live="polite">
+        <span class="live-dot" aria-hidden="true"></span><b data-t="live">ล่าสุด</b>
+        <ul id="ticker-list"></ul>
+      </div>
+      <div class="controls">
+        <button class="icon-btn" id="lang" type="button">EN</button>
+        <button class="icon-btn" id="theme" type="button"></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="story-wrap">
+    <a class="back" href="/" data-t="back">← กลับหน้าแรก</a>
+    <article class="story" id="story"><p class="empty" data-t="loading">กำลังโหลด…</p></article>
+    <section class="related" id="related" hidden>
+      <h2 data-t="related">ข่าวอื่นในหมวดนี้</h2>
+      <div class="list" id="related-list"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p data-t="footer">สรุปโดย AI จากข่าวต้นฉบับ รูปภาพเป็นของแหล่งข่าวต้นฉบับ โปรดอ่านต้นฉบับก่อนตัดสินใจ</p>
+  </footer>
+
+  <script src="/common.js"></script>
+  <script src="/story.js"></script>
+</body>
+</html>

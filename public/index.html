@@ -4,79 +4,98 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SecFin Brief</title>
-  <meta name="description" content="สรุปข่าว IT, Cyber Security และการเงิน ไทยและต่างประเทศ ทุกเช้า">
+  <meta name="description" content="สรุปข่าว IT, Cyber Security, การเงิน และสภาพอากาศ ไทยและต่างประเทศ ทุกเช้า">
+  <script>try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
   <link rel="alternate" type="application/rss+xml" title="SecFin Brief" href="/rss.xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Noto+Serif+Thai:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header class="top">
-    <div class="wrap top-row">
-      <div>
-        <h1>SecFin Brief</h1>
-        <p class="date" id="date">กำลังโหลด…</p>
+  <header>
+    <div class="wrap topbar">
+      <span class="today" id="today"></span>
+      <div class="ticker" id="ticker" hidden aria-live="polite">
+        <span class="live-dot" aria-hidden="true"></span><b data-t="live">ล่าสุด</b>
+        <ul id="ticker-list"></ul>
       </div>
       <div class="controls">
-        <select id="day" aria-label="เลือกวันที่"></select>
-        <button id="lang" type="button" aria-label="เปลี่ยนภาษา">EN</button>
+        <button class="icon-btn" id="lang" type="button">EN</button>
+        <button class="icon-btn" id="theme" type="button"></button>
       </div>
     </div>
-    <nav class="wrap tabs" aria-label="หมวดข่าว">
-      <a href="#cyber">Cyber</a>
-      <a href="#it">IT</a>
-      <a href="#finance" data-i18n="finance">การเงิน</a>
-      <a href="#disaster" data-i18n="disasterTab">อากาศ/ภัยพิบัติ</a>
-      <a href="#ask" data-i18n="askTab">ถามข่าว</a>
-      <form id="search" class="search" role="search">
-        <input id="q" type="search" minlength="2" maxlength="200" data-i18n-placeholder="searchHint" placeholder="ค้นข่าวย้อนหลัง 14 วัน" aria-label="ค้นข่าว">
-      </form>
-    </nav>
-    <div class="wrap ticker" id="ticker" hidden aria-live="polite">
-      <span class="live-dot" aria-hidden="true"></span>
-      <b data-i18n="live">ล่าสุด</b>
-      <ul id="ticker-list"></ul>
+    <div class="masthead">
+      <a class="brand" href="/">SecFin <span>Brief</span></a>
+      <p class="tagline" data-t="tagline">สรุปข่าว IT · Cyber · การเงิน · อากาศ ไทยและโลก ทุกเช้า 05:30 น.</p>
     </div>
   </header>
 
-  <section class="wrap results" id="results" hidden>
-    <div class="results-head"><h2 id="results-title"></h2><button id="clear" type="button" data-i18n="clear">ปิด</button></div>
-    <ol class="items"></ol>
-  </section>
-
-  <main class="wrap" id="main">
-    <section id="cyber" class="section"><h2>Cyber Security</h2><ol class="items"></ol></section>
-    <section id="it" class="section"><h2>IT</h2><ol class="items"></ol></section>
-    <section id="finance" class="section"><h2 data-i18n="financeTitle">การเงิน</h2><ol class="items"></ol></section>
-    <section id="disaster" class="section"><h2 data-i18n="disasterTitle">สภาพอากาศและภัยพิบัติ</h2><ol class="items"></ol></section>
-
-    <section id="popular-box" class="section" hidden>
-      <h2 data-i18n="popular">อ่านมากสุดสัปดาห์นี้</h2>
-      <ol class="items" id="popular"></ol>
-    </section>
-
-    <section id="ask" class="section">
-      <h2 data-i18n="askTitle">ถามข่าว</h2>
-      <p class="hint" data-i18n="askHint">ถามเกี่ยวกับข่าว 14 วันล่าสุด AI ตอบจากข่าวในคลังเท่านั้นและบอกแหล่งที่มา</p>
-      <form id="ask-form" class="ask-form">
-        <textarea id="ask-q" rows="2" minlength="5" maxlength="300" required></textarea>
-        <div class="ask-row">
-          <div id="turnstile"></div>
-          <button id="ask-btn" type="submit" data-i18n="askBtn">ถาม</button>
-        </div>
+  <div class="sections">
+    <div class="wrap">
+      <nav aria-label="หมวดข่าว">
+        <a href="#cyber" data-t="cyber">Cyber Security</a>
+        <a href="#it" data-t="it">IT</a>
+        <a href="#finance" data-t="finance">การเงิน</a>
+        <a href="#disaster" data-t="disaster">อากาศและภัยพิบัติ</a>
+      </nav>
+      <form id="search" class="search" role="search">
+        <input id="q" type="search" minlength="2" maxlength="200" aria-label="ค้นข่าว">
       </form>
-      <div id="answer" class="item answer" hidden></div>
-    </section>
+    </div>
+  </div>
 
-    <p class="notes" id="notes" hidden></p>
-  </main>
+  <div class="wrap layout">
+    <main>
+      <section class="results" id="results" hidden>
+        <div class="results-head"><h2 id="results-title"></h2><button class="btn ghost" id="clear" type="button" data-t="close">ปิด</button></div>
+        <div class="list" id="results-list"></div>
+      </section>
 
-  <footer class="wrap foot">
-    <p data-i18n="footer">สรุปโดย AI จากหัวข้อและเนื้อหาย่อของแหล่งข่าว โปรดอ่านต้นฉบับก่อนตัดสินใจ</p>
-    <p><a href="/weekly.pdf" data-i18n="weekly">PDF สรุปประจำสัปดาห์</a> · <a href="/rss.xml">RSS</a></p>
+      <section class="hero" id="hero" aria-label="ข่าวเด่น"></section>
+
+      <section class="block" id="cyber"><div class="block-head"><h2 data-t="cyber">Cyber Security</h2></div><div class="block-body"></div></section>
+      <section class="block" id="it"><div class="block-head"><h2 data-t="it">IT</h2></div><div class="block-body"></div></section>
+      <section class="block" id="finance"><div class="block-head"><h2 data-t="finance">การเงิน</h2></div><div class="block-body"></div></section>
+      <section class="block" id="disaster"><div class="block-head"><h2 data-t="disaster">อากาศและภัยพิบัติ</h2></div><div class="block-body"></div></section>
+    </main>
+
+    <aside class="rail">
+      <section class="rail-box" id="popular-box" hidden>
+        <h3 data-t="popular">อ่านมากสุดสัปดาห์นี้</h3>
+        <ol class="popular" id="popular"></ol>
+      </section>
+
+      <section class="rail-box" id="ask">
+        <h3 data-t="askTitle">ถามข่าว</h3>
+        <p data-t="askHint">ถามเกี่ยวกับข่าว 14 วันล่าสุด AI ตอบจากข่าวในคลังเท่านั้นและบอกแหล่งที่มา</p>
+        <form id="ask-form" class="ask-form">
+          <textarea id="ask-q" rows="3" minlength="5" maxlength="300" required></textarea>
+          <div class="ask-row">
+            <div id="turnstile"></div>
+            <button class="btn" id="ask-btn" type="submit" data-t="askBtn">ถาม</button>
+          </div>
+        </form>
+        <div class="answer" id="answer" hidden></div>
+      </section>
+
+      <section class="rail-box">
+        <h3 data-t="archive">ฉบับย้อนหลัง</h3>
+        <div class="rail-links">
+          <select id="day" aria-label="เลือกวันที่"></select>
+          <a href="/weekly.pdf" data-t="weekly">PDF สรุปประจำสัปดาห์</a>
+          <a href="/rss.xml">RSS</a>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="foot">
+    <p data-t="footer">สรุปโดย AI จากหัวข้อและเนื้อหาย่อของแหล่งข่าว รูปภาพเป็นของแหล่งข่าวต้นฉบับ โปรดอ่านต้นฉบับก่อนตัดสินใจ</p>
+    <p id="notes"></p>
   </footer>
 
+  <script src="/common.js"></script>
   <script src="/app.js"></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
 </body>

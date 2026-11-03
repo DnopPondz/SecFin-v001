@@ -6,6 +6,7 @@ import { popular, recordClick, validClick, type ClickBody } from "./clicks";
 import { enqueueFeeds, handleIngest, type IngestMessage } from "./ingest";
 import { renderRss } from "./rss";
 import { search } from "./search";
+import { backfillBriefImages } from "./story";
 import { thaiDate } from "./time";
 import { verifyTurnstile } from "./turnstile";
 import { loadWeekBriefs, makeWeeklyPdf, renderWeeklyHtml } from "./weekly";
@@ -45,6 +46,21 @@ app.get("/api/brief/latest", async (c) => {
 app.get("/api/brief/:date{\\d{4}-\\d{2}-\\d{2}}", async (c) => {
   const row = await c.env.DB.prepare("SELECT body FROM briefs WHERE date = ?").bind(c.req.param("date")).first<{ body: string }>();
   return row ? c.body(row.body, 200, jsonHeaders) : c.json({ ok: false, error: "ไม่พบสรุปข่าวของวันนี้" }, 404);
+});
+
+// Detailed write-up for one story. Falls back to the brief entry while the write-up is still being
+// generated (or if the publisher's page could not be summarised), so the story page always has content.
+app.get("/api/story/:id{[0-9a-f]{64}}", async (c) => {
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare("SELECT body FROM stories WHERE id = ?").bind(id).first<{ body: string }>();
+  if (row) return c.body(`{"detail":${row.body}}`, 200, jsonHeaders);
+  const latest = await latestBrief(c.env);
+  const brief = latest ? (JSON.parse(latest) as Brief) : null;
+  for (const [category, items] of Object.entries(brief?.sections ?? {})) {
+    const item = items.find((it) => it.id === id);
+    if (item) return c.json({ brief: { ...item, category } }, 200, { "Cache-Control": "no-store" });
+  }
+  return c.json({ ok: false, error: "ไม่พบข่าวนี้" }, 404);
 });
 
 app.get("/api/briefs", async (c) => {
@@ -154,7 +170,8 @@ app.post("/api/admin/run", async (c) => {
   if (task === "ingest") return c.json({ queued: await enqueueFeeds(c.env) });
   if (task === "brief") return c.json({ workflow: await startBrief(c.env, Date.now()) });
   if (task === "weekly") return c.json(await makeWeeklyPdf(c.env));
-  return c.json({ ok: false, error: "task must be ingest, brief or weekly" }, 400);
+  if (task === "images") return c.json({ patched: await backfillBriefImages(c.env, thaiDate(Date.now())) });
+  return c.json({ ok: false, error: "task must be ingest, brief, weekly or images" }, 400);
 });
 
 // Same as /api/ask without Turnstile, for checking answer quality from a script.
@@ -163,6 +180,22 @@ app.post("/api/admin/ask", async (c) => {
   const { q } = (await c.req.json().catch(() => ({}))) as { q?: string };
   if (!q) return c.json({ ok: false, error: "q required" }, 400);
   return c.json(await ask(c.env, q));
+});
+
+// Screenshot of one of this site's own pages through Browser Run, for checking layout and themes.
+// Same-origin paths only, so it cannot be used to render arbitrary sites.
+app.get("/api/admin/screenshot", async (c) => {
+  if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
+  const path = c.req.query("path") ?? "/";
+  if (!path.startsWith("/") || path.startsWith("//")) return c.json({ ok: false, error: "path must be a same-origin path" }, 400);
+  const width = Math.min(Math.max(Number(c.req.query("w")) || 1280, 320), 1600);
+  const res = await c.env.BROWSER.quickAction("screenshot", {
+    url: new URL(path, c.req.url).toString(),
+    viewport: { width, height: 900 },
+    gotoOptions: { waitUntil: "networkidle0", timeout: 30_000 },
+    screenshotOptions: { fullPage: c.req.query("full") === "1" },
+  });
+  return new Response(res.body, { status: res.status, headers: { "Content-Type": res.headers.get("Content-Type") ?? "image/png" } });
 });
 
 app.get("/api/admin/workflow/:id", async (c) => {

@@ -35,9 +35,10 @@ export async function addNeurons(env: Env, neurons: number, now: number): Promis
     .run();
 }
 
-// Visitor-triggered calls (search, ask) must leave this much for the brief, which runs at
-// 22:30 UTC, near the end of the UTC day the budget is counted in. A brief costs about 160.
-export const BRIEF_RESERVE = 600;
+// Visitor-triggered calls (search, ask) must leave this much for the brief Workflow, which runs at
+// 22:30 UTC, near the end of the UTC day the budget is counted in. The 4 sections cost about 200
+// and the 20 detailed stories about 60 each (worst case about 100).
+export const BRIEF_RESERVE = 2500;
 
 // Refuse a call up front when its worst case would cross DAILY_NEURON_BUDGET minus `reserve`.
 export async function assertBudget(env: Env, estimate: number, now: number, reserve = 0): Promise<void> {
@@ -45,9 +46,13 @@ export async function assertBudget(env: Env, estimate: number, now: number, rese
   if ((await neuronsUsed(env, now)) + estimate > budget - reserve) throw new BudgetExceeded("daily Neuron budget reached");
 }
 
+// skipCache: a cached reply would make a Workflow retry return the same broken output again
+// (seen on 2026-11-03: three retries failed at the same JSON position within a second).
 export function gatewayOptions(env: Env): AiOptions | undefined {
-  return env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : undefined;
+  return env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID, skipCache: true } } : undefined;
 }
+
+export class TruncatedOutput extends Error {}
 
 // One JSON-mode chat call, metered against DAILY_NEURON_BUDGET before it is sent.
 export async function runJson(env: Env, messages: ChatMessage[], schema: object, maxTokens: number, now = Date.now(), reserve = 0): Promise<JsonResult> {
@@ -65,7 +70,7 @@ export async function runJson(env: Env, messages: ChatMessage[], schema: object,
     } as never,
     options,
   )) as {
-    choices?: { message?: { content?: unknown } }[];
+    choices?: { message?: { content?: unknown }; finish_reason?: string }[];
     response?: unknown;
     usage?: { prompt_tokens?: number; completion_tokens?: number };
   };
@@ -77,6 +82,8 @@ export async function runJson(env: Env, messages: ChatMessage[], schema: object,
       : worstCaseNeurons(messages, maxTokens);
   await addNeurons(env, neurons, now);
 
+  // A reply cut off at max_tokens is unparseable JSON; say so instead of reporting a syntax error.
+  if (out.choices?.[0]?.finish_reason === "length") throw new TruncatedOutput(`reply hit max_tokens (${maxTokens})`);
   const content = out.choices?.[0]?.message?.content ?? out.response;
   const data = typeof content === "string" ? JSON.parse(stripFence(content)) : content;
   return { data, neurons };

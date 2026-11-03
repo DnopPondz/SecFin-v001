@@ -1,4 +1,6 @@
+import { BudgetExceeded } from "./ai";
 import { embedPending } from "./cluster";
+import { runStoryJob, type StoryJob } from "./story";
 import { parseFeed } from "./feed";
 import { sha256 } from "./hash";
 import type { TickerItem } from "./live";
@@ -14,9 +16,8 @@ const RETENTION_DAYS = 14;
 // queryable before the next feed is clustered against it.
 const STAGGER_SECONDS = 30;
 
-export interface IngestMessage {
-  source: string;
-}
+// The one queue carries two kinds of work: fetching a feed, and writing a detailed story.
+export type IngestMessage = { source: string } | { story: StoryJob };
 
 export interface IngestResult {
   source: string;
@@ -35,6 +36,19 @@ export async function enqueueFeeds(env: Env): Promise<number> {
 // Queue consumer, one feed per invocation so each gets its own 10 ms CPU budget.
 export async function handleIngest(batch: MessageBatch<IngestMessage>, env: Env): Promise<void> {
   for (const msg of batch.messages) {
+    if ("story" in msg.body) {
+      const { item } = msg.body.story;
+      try {
+        console.log("story", item.id.slice(0, 12), await runStoryJob(env, msg.body.story));
+        msg.ack();
+      } catch (err) {
+        console.error(`story ${item.id.slice(0, 12)}:`, err);
+        // Retrying cannot help once the daily budget is spent; anything else gets the queue's retries.
+        if (err instanceof BudgetExceeded) msg.ack();
+        else msg.retry({ delaySeconds: 60 });
+      }
+      continue;
+    }
     const source = sourceById(msg.body.source);
     if (!source) {
       msg.ack(); // a feed removed from SOURCES while its message was queued
@@ -66,8 +80,8 @@ export async function ingestOne(env: Env, source: Source, now = Date.now()): Pro
     const stmts = await Promise.all(
       items.map(async (it) =>
         env.DB.prepare(
-          "INSERT OR IGNORE INTO articles (id, url, source, category, region, lang, title, snippet, published_at, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ).bind(await sha256(it.link), it.link, source.id, it.category, source.region, source.lang, it.title, it.summary, it.published, now),
+          "INSERT OR IGNORE INTO articles (id, url, source, category, region, lang, title, snippet, published_at, fetched_at, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ).bind(await sha256(it.link), it.link, source.id, it.category, source.region, source.lang, it.title, it.summary, it.published, now, it.image),
       ),
     );
     if (stmts.length > 0) {
@@ -107,5 +121,6 @@ export async function pruneArticles(env: Env, now = Date.now()): Promise<number>
   if (results.length > 0) await env.VECTORS.deleteByIds(results.map((r) => r.id));
   const out = await env.DB.prepare("DELETE FROM articles WHERE fetched_at < ?").bind(cutoff).run();
   await env.DB.prepare("DELETE FROM cves WHERE checked_at < ?").bind(cutoff).run();
+  await env.DB.prepare("DELETE FROM stories WHERE created_at < ?").bind(cutoff).run();
   return out.meta.changes ?? 0;
 }
