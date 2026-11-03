@@ -1,7 +1,7 @@
-export type Category = "it" | "cyber" | "finance";
+export type Category = "it" | "cyber" | "finance" | "disaster";
 export type Region = "th" | "global";
 
-export const CATEGORIES: Category[] = ["cyber", "it", "finance"];
+export const CATEGORIES: Category[] = ["cyber", "it", "finance", "disaster"];
 
 export interface Source {
   id: string;
@@ -10,6 +10,10 @@ export interface Source {
   category: Category;
   region: Region;
   lang: "th" | "en";
+  // General news feeds: keep only items that match the disaster keywords (see admit() in select.ts).
+  filter?: "disaster";
+  // Earthquake feeds: drop quakes below this magnitude (TMD lists every M2 tremor in the region).
+  minMagnitude?: number;
 }
 
 // Every URL was checked to return a non-empty feed on 2026-11-03.
@@ -30,6 +34,16 @@ export const SOURCES: Source[] = [
   { id: "bangkokpost", name: "Bangkok Post Business", url: "https://www.bangkokpost.com/rss/data/business.xml", category: "finance", region: "th", lang: "en" },
   { id: "prachachat", name: "ประชาชาติธุรกิจ", url: "https://www.prachachat.net/feed", category: "finance", region: "th", lang: "th" },
   { id: "kaohoon", name: "ข่าวหุ้น", url: "https://www.kaohoon.com/feed", category: "finance", region: "th", lang: "th" },
+  // Weather and disasters, added 2026-11-03. Thai general and regional feeds are keyword-filtered.
+  // Left out: TMD weather warnings (no working feed), ปภ. (no RSS), Air4Thai PM2.5 (TLS chain fails validation).
+  { id: "gdacs", name: "GDACS", url: "https://www.gdacs.org/xml/rss.xml", category: "disaster", region: "global", lang: "en" },
+  { id: "usgs", name: "USGS Earthquakes", url: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.atom", category: "disaster", region: "global", lang: "en" },
+  { id: "tmdquake", name: "กรมอุตุนิยมวิทยา (แผ่นดินไหว)", url: "https://earthquake.tmd.go.th/feed/rss_inside.xml", category: "disaster", region: "th", lang: "th", minMagnitude: 3 },
+  { id: "chiangmainews", name: "Chiang Mai News", url: "https://www.chiangmainews.co.th/feed/", category: "disaster", region: "th", lang: "th", filter: "disaster" },
+  { id: "khaosod-region", name: "ข่าวสด ทุกทิศทั่วไทย", url: "https://www.khaosod.co.th/around-thailand/feed", category: "disaster", region: "th", lang: "th", filter: "disaster" },
+  { id: "matichon-region", name: "มติชน ภูมิภาค", url: "https://www.matichon.co.th/region/feed", category: "disaster", region: "th", lang: "th", filter: "disaster" },
+  { id: "thairath", name: "ไทยรัฐ", url: "https://www.thairath.co.th/rss/news", category: "disaster", region: "th", lang: "th", filter: "disaster" },
+  { id: "bangkokpost-th", name: "Bangkok Post Thailand", url: "https://www.bangkokpost.com/rss/data/thailand.xml", category: "disaster", region: "th", lang: "en", filter: "disaster" },
 ];
 
 export function sourceById(id: string): Source | undefined {

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { MODEL, runJson, type ChatMessage } from "./ai";
 import { extractCves, lookupCves, type CveInfo } from "./cve";
-import { collapseClusters, pickCandidates, type Article } from "./select";
-import { sourceById, type Category } from "./sources";
+import { collapseClusters, isNorth, pickCandidates, type Article } from "./select";
+import { CATEGORIES, sourceById, type Category } from "./sources";
 import { thaiDate } from "./time";
 
 const ITEMS_PER_SECTION = 5;
@@ -28,6 +28,7 @@ export interface BriefItem {
   alsoReported: string[]; // names of the other sources
   sourceText: string; // original headline + snippet, kept so CVE ids come from the publisher, not the model
   cves: CveInfo[];
+  north: boolean; // mentions Northern Thailand (keyword match on the publisher's text)
 }
 
 export interface Section {
@@ -49,7 +50,20 @@ const SECTION_LABEL: Record<Category, string> = {
   cyber: "cybersecurity (threats, vulnerabilities, breaches, advisories)",
   it: "IT and technology (enterprise IT, cloud, AI, regulation, major vendors)",
   finance: "finance and economy (markets, central banks, Thai economy, fintech)",
+  disaster:
+    "weather and natural disasters (storms, floods, landslides, earthquakes, haze and PM2.5, heat, cold). The reader lives in Northern Thailand: rank stories about Northern Thailand first, then the rest of Thailand and neighbouring countries, then major global events. Skip minor events far from Thailand unless they are severe",
 };
+
+const SEVERITY_HINT: Partial<Record<Category, string>> = {
+  cyber: "critical, high, medium or low by real-world risk",
+  disaster: "critical, high, medium or low by threat to people and property",
+};
+
+// Northern Thailand first, then the rest of Thailand, in the disaster section only.
+function disasterPriority(a: Article): number {
+  if (isNorth(`${a.title} ${a.snippet}`)) return 2;
+  return a.region === "th" ? 1 : 0;
+}
 
 const ItemSchema = z.object({
   i: z.number().int(),
@@ -90,7 +104,7 @@ const JSON_SCHEMA = {
 export function buildMessages(category: Category, candidates: Article[]): ChatMessage[] {
   const list = candidates
     .map((a, i) => {
-      const reach = (a.coverage ?? 1) > 1 ? `, reported by ${a.coverage} sources` : "";
+      const reach = `${(a.coverage ?? 1) > 1 ? `, reported by ${a.coverage} sources` : ""}${isNorth(`${a.title} ${a.snippet}`) ? ", Northern Thailand" : ""}`;
       return `[${i}] (${sourceById(a.source)?.name ?? a.source}, ${a.region === "th" ? "Thailand" : "global"}${reach}) ${a.title}\n${a.snippet}`;
     })
     .join("\n\n");
@@ -111,7 +125,7 @@ export function buildMessages(category: Category, candidates: Article[]): ChatMe
         "A story reported by several sources is usually more significant, but judge by impact.",
         "For each: i (the item number), title_th and title_en (short headline), summary_th and summary_en (2 sentences),",
         "why_th and why_en (1 sentence: the practical impact or what a reader in Thailand should check or do),",
-        `severity (${category === "cyber" ? "critical, high, medium or low by real-world risk" : "always none"}).`,
+        `severity (${SEVERITY_HINT[category] ?? "always none"}).`,
         "",
         list,
       ].join("\n"),
@@ -134,6 +148,7 @@ function toItem(a: Article, ai?: z.infer<typeof ItemSchema>): BriefItem {
     alsoReported: (a.alsoIn ?? []).map((s) => sourceById(s)?.name ?? s),
     sourceText: `${a.title} ${a.snippet}`,
     cves: [],
+    north: isNorth(`${a.title} ${a.snippet}`),
   };
 }
 
@@ -156,11 +171,12 @@ export function mergePicks(candidates: Article[], raw: unknown): BriefItem[] {
 // All recent articles across every section, so a story's coverage counts sources in any section.
 async function candidatesFor(env: Env, category: Category, now: number): Promise<Article[]> {
   const { results } = await env.DB.prepare(
-    "SELECT id, url, source, category, region, lang, title, snippet, published_at, cluster_id FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT 600",
+    "SELECT id, url, source, category, region, lang, title, snippet, published_at, cluster_id FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT 1000",
   )
     .bind(now - WINDOW_MS)
     .all<Article>();
-  return pickCandidates(collapseClusters(results).filter((a) => a.category === category));
+  const stories = collapseClusters(results).filter((a) => a.category === category);
+  return pickCandidates(category === "disaster" ? stories.map((a) => ({ ...a, priority: disasterPriority(a) })) : stories);
 }
 
 // Throws when the AI call fails so the Workflow step can retry it; rawSection is the fallback.
@@ -192,7 +208,7 @@ export function assembleBrief(now: number, sections: Record<Category, Section>, 
     generatedAt: now,
     model: all.some((s) => s.ai) ? MODEL : null,
     neurons: all.reduce((n, s) => n + s.neurons, 0),
-    sections: { cyber: sections.cyber.items, it: sections.it.items, finance: sections.finance.items },
+    sections: Object.fromEntries(CATEGORIES.map((c) => [c, sections[c]?.items ?? []])) as Record<Category, BriefItem[]>,
     notes,
   };
 }

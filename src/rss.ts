@@ -1,7 +1,7 @@
 import type { Brief } from "./brief";
 import { CATEGORIES, type Category } from "./sources";
 
-const SECTION_TH: Record<Category, string> = { cyber: "Cyber", it: "IT", finance: "การเงิน" };
+const SECTION_TH: Record<Category, string> = { cyber: "Cyber", it: "IT", finance: "การเงิน", disaster: "อากาศ/ภัยพิบัติ" };
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -11,7 +11,8 @@ function esc(s: string): string {
 export function renderRss(brief: Brief | null, origin: string): string {
   const items = brief
     ? CATEGORIES.flatMap((cat) =>
-        brief.sections[cat].map((it) => {
+        // Briefs from before a section existed have no entry for it.
+        (brief.sections[cat] ?? []).map((it) => {
           const desc = it.why ? `${it.summary.th}\n\nทำไมต้องสนใจ: ${it.why.th}` : it.summary.th;
           return [
             "<item>",

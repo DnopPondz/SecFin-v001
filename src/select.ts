@@ -1,4 +1,4 @@
-import type { Category } from "./sources";
+import type { Category, Source } from "./sources";
 
 export interface Article {
   id: string;
@@ -14,6 +14,8 @@ export interface Article {
   // Filled by collapseClusters: how many distinct sources carried the story, and which others.
   coverage?: number;
   alsoIn?: string[];
+  // Section-specific boost applied before coverage (Northern Thailand in the disaster section).
+  priority?: number;
 }
 
 // One row per story: the newest article represents its cluster, and the story goes to the
@@ -52,6 +54,63 @@ export function classify(defaultCategory: Category, title: string, snippet: stri
   return CYBER_WORDS.some((w) => text.includes(w)) ? "cyber" : "it";
 }
 
+const DISASTER_WORDS = [
+  "น้ำท่วม", "อุทกภัย", "ดินถล่ม", "ดินโคลนถล่ม", "แผ่นดินไหว", "พายุ", "ไต้ฝุ่น", "ฝนตกหนัก", "ฝนถล่ม", "น้ำป่า", "ภัยแล้ง",
+  "ไฟป่า", "หมอกควัน", "ฝุ่นละออง", "ฝุ่นพิษ", "pm2.5", "pm 2.5", "คลื่นความร้อน", "อากาศหนาว", "ลมหนาว", "ความกดอากาศสูง",
+  "กรมอุตุ", "อุตุนิยมวิทยา", "พยากรณ์อากาศ", "ภัยพิบัติ", "สาธารณภัย", "ปภ.", "สึนามิ", "ภูเขาไฟ", "ลูกเห็บ", "วาตภัย",
+  "flood", "landslide", "earthquake", "typhoon", "cyclone", "tropical storm", "heavy rain", "drought", "wildfire", "forest fire",
+  "haze", "heatwave", "heat wave", "tsunami", "volcan", "weather", "monsoon",
+];
+
+export function isDisaster(text: string): boolean {
+  const t = text.toLowerCase();
+  return DISASTER_WORDS.some((w) => t.includes(w));
+}
+
+// The owner lives in the North, so these stories are ranked first in the disaster section.
+const NORTH_TH = ["ภาคเหนือ", "เชียงใหม่", "เชียงราย", "ลำปาง", "ลำพูน", "แม่ฮ่องสอน", "พะเยา", "อุตรดิตถ์", "สุโขทัย", "พิษณุโลก", "เพชรบูรณ์", "แม่สอด"];
+// Short names that are also parts of common words. Headlines write them bare ("พายุถล่มแพร่"),
+// so they match unless they are part of เผยแพร่ / แพร่ระบาด, ตากแดด / ตากใบ (a southern district) / ตากสิน, น่านฟ้า / น่านน้ำ.
+const NORTH_TH_AMBIGUOUS = [
+  /(?<!เผย)แพร่(?!ระบาด|กระจาย|เชื้อ|ภาพ|หลาย|ข่าว|พันธุ์|ขยาย)/,
+  /(?<!ผึ่ง)ตาก(?!แดด|ผ้า|ลม|ฝน|อากาศ|ข้าว|ใบ|สิน)/,
+  /น่าน(?!ฟ้า|น้ำ)/,
+];
+const NORTH_EN = /\b(northern thailand|chiang mai|chiang rai|lampang|lamphun|mae hong son|nan province|phayao|phrae|uttaradit|tak province|sukhothai|phitsanulok|phetchabun)\b/i;
+
+// TMD quake titles carry "(lat,lon)". Quakes in this box (northern Thailand plus the nearby
+// Myanmar, Laos and Yunnan border areas) are often felt in Chiang Rai and Chiang Mai.
+const NORTH_BOX = { minLat: 16, maxLat: 23, minLon: 96.5, maxLon: 102.5 };
+
+function nearNorth(text: string): boolean {
+  const m = text.match(/\((-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\)/);
+  if (!m) return false;
+  const lat = Number(m[1]);
+  const lon = Number(m[2]);
+  return lat >= NORTH_BOX.minLat && lat <= NORTH_BOX.maxLat && lon >= NORTH_BOX.minLon && lon <= NORTH_BOX.maxLon;
+}
+
+export function isNorth(text: string): boolean {
+  return NORTH_TH.some((w) => text.includes(w)) || NORTH_TH_AMBIGUOUS.some((re) => re.test(text)) || NORTH_EN.test(text) || nearNorth(text);
+}
+
+// "ขนาด 2.6" (TMD) or "M 4.7" / "Magnitude 6M" (USGS, GDACS).
+export function magnitude(text: string): number | null {
+  const m = text.match(/(?:ขนาด|magnitude|\bM)\s*([0-9]+(?:\.[0-9]+)?)/i);
+  return m ? Number(m[1]) : null;
+}
+
+// Which section an item goes to, or null to skip it entirely.
+export function admit(source: Pick<Source, "category" | "filter" | "minMagnitude">, title: string, snippet: string): Category | null {
+  const text = `${title} ${snippet}`;
+  if (source.filter === "disaster" && !isDisaster(text)) return null;
+  if (source.minMagnitude !== undefined) {
+    const mag = magnitude(text);
+    if (mag !== null && mag < source.minMagnitude) return null;
+  }
+  return classify(source.category, title, snippet);
+}
+
 // Character bigrams work for Thai, which has no spaces between words.
 function bigrams(s: string): Set<string> {
   const t = s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
@@ -81,7 +140,9 @@ export const DEFAULT_PICK: PickOptions = { limit: 18, perSource: 4, duplicateAt:
 // headlines that clustering missed. Stories carried by more sources go first, then newest first.
 export function pickCandidates(articles: Article[], opts: PickOptions = DEFAULT_PICK): Article[] {
   const bySource = new Map<string, Article[]>();
-  const ranked = [...articles].sort((p, q) => (q.coverage ?? 1) - (p.coverage ?? 1) || q.published_at - p.published_at);
+  const ranked = [...articles].sort(
+    (p, q) => (q.priority ?? 0) - (p.priority ?? 0) || (q.coverage ?? 1) - (p.coverage ?? 1) || q.published_at - p.published_at,
+  );
   for (const a of ranked) {
     const list = bySource.get(a.source) ?? [];
     list.push(a);

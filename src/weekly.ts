@@ -6,7 +6,7 @@ const PER_SECTION = 10;
 // Stored in KV until R2 is enabled (KV values can be 25 MiB; a digest is a few hundred KB).
 const PDF_TTL_SECONDS = 60 * 86_400;
 
-const SECTION_TH: Record<Category, string> = { cyber: "Cyber Security", it: "IT", finance: "การเงิน" };
+const SECTION_TH: Record<Category, string> = { cyber: "Cyber Security", it: "IT", finance: "การเงิน", disaster: "สภาพอากาศและภัยพิบัติ" };
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

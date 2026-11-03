@@ -11,6 +11,7 @@
       live: "ล่าสุด", popular: "อ่านมากสุดสัปดาห์นี้", askTab: "ถามข่าว", askTitle: "ถามข่าว", askBtn: "ถาม", asking: "กำลังหาคำตอบ…",
       askHint: "ถามเกี่ยวกับข่าว 14 วันล่าสุด AI ตอบจากข่าวในคลังเท่านั้นและบอกแหล่งที่มา", askNeedCheck: "รอการยืนยันว่าไม่ใช่บอทสักครู่",
       askSources: "แหล่งที่มา", weekly: "PDF สรุปประจำสัปดาห์", clicks: (n) => `${n} คลิก`,
+      disasterTab: "อากาศ/ภัยพิบัติ", disasterTitle: "สภาพอากาศและภัยพิบัติ", north: "ภาคเหนือ",
     },
     en: {
       finance: "Finance", financeTitle: "Finance", why: "Why it matters", empty: "No stories in this section yet", none: "No brief yet. A new one is published every morning at 05:30 Thai time.",
@@ -20,6 +21,7 @@
       live: "Live", popular: "Most read this week", askTab: "Ask", askTitle: "Ask the news", askBtn: "Ask", asking: "Finding an answer…",
       askHint: "Ask about the last 14 days of news. The AI answers only from stored stories and lists its sources.", askNeedCheck: "Waiting for the bot check, one moment",
       askSources: "Sources", weekly: "Weekly PDF digest", clicks: (n) => `${n} clicks`,
+      disasterTab: "Weather", disasterTitle: "Weather and disasters", north: "Northern Thailand",
     },
   };
   const SEV = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
@@ -52,6 +54,7 @@
     const meta = el("div", { class: "meta" });
     if (it.severity) meta.append(el("span", { class: `sev ${it.severity}` }, SEV[it.severity]));
     meta.append(el("span", { class: "chip" }, TEXT[lang][it.region]), el("span", {}, it.sourceName));
+    if (it.north) meta.append(el("span", { class: "chip north" }, TEXT[lang].north));
     if (it.coverage > 1) meta.append(el("span", { class: "chip", title: (it.alsoReported || []).join(", ") }, TEXT[lang].sources(it.coverage)));
     const li = el("li", { class: "item" },
       el("h3", {}, link(it.url, it.title[lang], "brief", cat)),
@@ -104,7 +107,7 @@
     $("#lang").textContent = lang === "th" ? "EN" : "ไทย";
     document.querySelectorAll("[data-i18n]").forEach((n) => { n.textContent = TEXT[lang][n.dataset.i18n]; });
     document.querySelectorAll("[data-i18n-placeholder]").forEach((n) => { n.placeholder = TEXT[lang][n.dataset.i18nPlaceholder]; });
-    for (const cat of ["cyber", "it", "finance"]) {
+    for (const cat of ["cyber", "it", "finance", "disaster"]) {
       const list = $(`#${cat} .items`);
       list.replaceChildren();
       const items = brief?.sections?.[cat] ?? [];

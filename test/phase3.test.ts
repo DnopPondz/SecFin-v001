@@ -38,12 +38,12 @@ test("validClick accepts http links and normalizes unknown fields", () => {
 
 function item(url: string, coverage: number, title = url): BriefItem {
   return {
-    url, source: "s", sourceName: "S", region: "global", published: 0, coverage, alsoReported: [], sourceText: "", cves: [],
+    url, source: "s", sourceName: "S", region: "global", published: 0, coverage, alsoReported: [], sourceText: "", cves: [], north: false,
     title: { th: title, en: title }, summary: { th: "sum", en: "sum" }, why: null, severity: null,
   };
 }
 function brief(date: string, cyber: BriefItem[]): Brief {
-  return { date, generatedAt: 0, model: null, neurons: 0, notes: [], sections: { cyber, it: [], finance: [] } };
+  return { date, generatedAt: 0, model: null, neurons: 0, notes: [], sections: { cyber, it: [], finance: [], disaster: [] } };
 }
 
 test("weeklyTop dedupes links across days and ranks by coverage", () => {
