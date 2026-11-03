@@ -1,8 +1,12 @@
 import { Hono } from "hono";
-import { neuronsUsed } from "./ai";
-import { buildBrief, saveBrief, type Brief } from "./brief";
-import { ingest, pruneArticles } from "./ingest";
+import { BudgetExceeded, neuronsUsed } from "./ai";
+import type { Brief } from "./brief";
+import { enqueueFeeds, handleIngest, type IngestMessage } from "./ingest";
 import { renderRss } from "./rss";
+import { search } from "./search";
+import { thaiDate } from "./time";
+
+export { BriefWorkflow } from "./workflow";
 
 // 05:30 Thai time. Must match the second entry of triggers.crons in wrangler.jsonc.
 const BRIEF_CRON = "30 22 * * *";
@@ -42,6 +46,20 @@ app.get("/api/briefs", async (c) => {
   return c.json(results.map((r) => r.date), 200, { "Cache-Control": "public, max-age=300" });
 });
 
+// Each search costs Neurons, so it has its own tighter per-IP limit on top of the daily budget.
+app.get("/api/search", async (c) => {
+  const q = (c.req.query("q") ?? "").trim();
+  if (q.length < 2 || q.length > 200) return c.json({ ok: false, error: "คำค้นต้องยาว 2 ถึง 200 ตัวอักษร" }, 400);
+  const { success } = await c.env.SEARCH_LIMITER.limit({ key: c.req.header("CF-Connecting-IP") ?? "unknown" });
+  if (!success) return c.json({ ok: false, error: "ค้นหาถี่เกินไป รอสักครู่แล้วลองใหม่" }, 429);
+  try {
+    return c.json({ ok: true, hits: await search(c.env, q) }, 200, { "Cache-Control": "public, max-age=600" });
+  } catch (err) {
+    if (err instanceof BudgetExceeded) return c.json({ ok: false, error: "วันนี้ใช้โควตา AI ครบแล้ว ลองใหม่พรุ่งนี้" }, 503);
+    throw err;
+  }
+});
+
 app.get("/rss.xml", async (c) => {
   const body = await latestBrief(c.env);
   const brief = body ? (JSON.parse(body) as Brief) : null;
@@ -63,34 +81,40 @@ function keyMatches(given: string | undefined, expected: string | undefined): bo
 app.get("/api/admin/status", async (c) => {
   if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
   const { results } = await c.env.DB.prepare("SELECT source, last_run, last_status, last_count FROM feed_state ORDER BY source").all();
-  const articles = await c.env.DB.prepare("SELECT category, COUNT(*) AS n FROM articles GROUP BY category").all();
+  const articles = await c.env.DB.prepare(
+    "SELECT category, COUNT(*) AS n, SUM(embedded) AS embedded, COUNT(DISTINCT cluster_id) AS clusters FROM articles GROUP BY category",
+  ).all();
   return c.json({ feeds: results, articles: articles.results, neuronsToday: await neuronsUsed(c.env), budget: Number(c.env.DAILY_NEURON_BUDGET) });
 });
 
-// Manual runs for testing. ?task=ingest fetches the next feeds; ?task=brief rebuilds today's brief (costs Neurons).
+// Manual runs. ?task=ingest queues every feed; ?task=brief starts the brief Workflow (costs Neurons).
 app.post("/api/admin/run", async (c) => {
   if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
   const task = c.req.query("task");
-  if (task === "ingest") return c.json(await ingest(c.env));
-  if (task === "brief") {
-    const brief = await buildBrief(c.env);
-    await saveBrief(c.env, brief);
-    return c.json({ date: brief.date, neurons: brief.neurons, notes: brief.notes, counts: Object.fromEntries(Object.entries(brief.sections).map(([k, v]) => [k, v.length])) });
-  }
+  if (task === "ingest") return c.json({ queued: await enqueueFeeds(c.env) });
+  if (task === "brief") return c.json({ workflow: await startBrief(c.env, Date.now()) });
   return c.json({ ok: false, error: "task must be ingest or brief" }, 400);
 });
 
+app.get("/api/admin/workflow/:id", async (c) => {
+  if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
+  const instance = await c.env.BRIEF_WORKFLOW.get(c.req.param("id"));
+  return c.json(await instance.status());
+});
+
+async function startBrief(env: Env, now: number): Promise<string> {
+  const instance = await env.BRIEF_WORKFLOW.create({ id: `brief-${thaiDate(now)}-${now}`, params: { now } });
+  return instance.id;
+}
+
 export default {
   fetch: app.fetch,
-  async scheduled(controller, env, ctx) {
+  async scheduled(controller, env) {
     if (controller.cron === BRIEF_CRON) {
-      const brief = await buildBrief(env, controller.scheduledTime);
-      await saveBrief(env, brief);
-      ctx.waitUntil(pruneArticles(env, controller.scheduledTime));
-      console.log(`brief ${brief.date}: ${brief.neurons.toFixed(0)} neurons`, brief.notes);
+      console.log("brief workflow", await startBrief(env, controller.scheduledTime));
       return;
     }
-    const results = await ingest(env, controller.scheduledTime);
-    console.log("ingest", results);
+    console.log("queued feeds", await enqueueFeeds(env));
   },
-} satisfies ExportedHandler<Env>;
+  queue: handleIngest,
+} satisfies ExportedHandler<Env, IngestMessage>;

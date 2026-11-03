@@ -27,8 +27,16 @@
       <a href="#cyber">Cyber</a>
       <a href="#it">IT</a>
       <a href="#finance" data-i18n="finance">การเงิน</a>
+      <form id="search" class="search" role="search">
+        <input id="q" type="search" minlength="2" maxlength="200" data-i18n-placeholder="searchHint" placeholder="ค้นข่าวย้อนหลัง 14 วัน" aria-label="ค้นข่าว">
+      </form>
     </nav>
   </header>
+
+  <section class="wrap results" id="results" hidden>
+    <div class="results-head"><h2 id="results-title"></h2><button id="clear" type="button" data-i18n="clear">ปิด</button></div>
+    <ol class="items"></ol>
+  </section>
 
   <main class="wrap" id="main">
     <section id="cyber" class="section"><h2>Cyber Security</h2><ol class="items"></ol></section>

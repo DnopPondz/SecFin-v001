@@ -33,17 +33,22 @@ Everything must run on the Cloudflare **Workers Free plan**. Set by the owner, n
 - Source: GitHub `DnopPondz/llfout`, branch `main` (history reset on 2026-11-03 when livelife was retired). No Workers Builds connection.
 - Worker `secfin-brief`, live at https://secfin-brief.webdev-80d.workers.dev. Deploy with `npx wrangler deploy`; credentials come from the gitignored `.env`.
 - D1 `secfin-db` (`4ac76ae1-e986-41ad-9ed6-13220d43564e`, APAC). KV `secfin-cache` (`d56788bcfbd445e48290247e4284db18`).
-- The API token in `.env` has no Vectorize or AI Gateway permission, and R2 is not enabled yet.
-- The old livelife project was retired on 2026-11-03. Its D1 database `livelife-db` may still exist and can be deleted.
+- Vectorize `secfin-articles` (1024 dims, cosine). Queue `secfin-ingest`. Workflow `secfin-brief` (class `BriefWorkflow`). AI Gateway `secfin-brief` (logs, 30 requests/minute).
+- R2 is not enabled yet (must be done in the dashboard by the owner).
+- The old livelife project was retired on 2026-11-03 and all its Cloudflare resources are gone.
 
 ## How it works
 
-- Cron `*/30 * * * *`: `src/ingest.ts` fetches the 3 feeds that waited longest (CPU budget), stores headline + snippet + link in D1. Full article text is never stored.
-- Cron `30 22 * * *` (05:30 Thai): `src/brief.ts` shortlists up to 18 stories per section (round-robin by source, near-duplicates dropped), asks Gemma 4 26B for the top 5 in Thai and English, saves the brief to D1 and KV `brief:latest`, prunes articles older than 14 days.
-- Every AI call is metered in D1 `ai_usage` and refused past `DAILY_NEURON_BUDGET` (3,000). A full brief costs about 155 Neurons. Without AI the brief falls back to raw headlines.
+- Cron `0 * * * *`: `enqueueFeeds` sends one queue message per feed, 30 s apart. The consumer (`handleIngest`, one feed per invocation for the 10 ms CPU budget) stores headline + snippet + link in D1, then `embedPending` embeds new articles with bge-m3, joins each to the nearest earlier story in Vectorize (score >= 0.75 within 72 h, `src/cluster.ts`) and upserts the vector. Full article text is never stored.
+- Cron `30 22 * * *` (05:30 Thai) starts `BriefWorkflow` (`src/workflow.ts`): one step per section (`aiSection`, retried twice, falls back to `rawSection`), a CVE step, save, prune. Sections collapse clusters first, so a story counts all sources that carried it in the last 30 h; Gemma 4 26B picks the top 5 in Thai and English and sees the source count.
+- CVE data (CVSS, CISA KEV dates) comes from the NVD API for ids found in the publisher's own text, never from the model; cached in D1 `cves`, at most 5 NVD calls per run (NVD allows 5 per 30 s without a key). The full KEV JSON is too heavy to parse in 10 ms CPU.
+- `GET /api/search?q=` embeds the query and searches Vectorize (14 days of articles), 10 per minute per IP.
+- Every AI call is metered in D1 `ai_usage` and refused past `DAILY_NEURON_BUDGET` (3,000). A full brief costs about 160 Neurons and a day of embeddings well under 100. Without AI the brief falls back to raw headlines.
+- Pruning deletes vectors before rows: Vectorize Free stores 5M dimensions, about 4,800 bge-m3 vectors.
 - The model's picks are mapped back to stored articles by index, so it can never invent a link. Prompts forbid facts not in the snippet; spot-check CVE ids and numbers when changing prompts or models.
 - Sources live in `src/sources.ts`. Do not work around a publisher's block (BleepingComputer returns 403 to Workers, so it was removed).
-- Admin: `POST /api/admin/run?task=ingest|brief` and `GET /api/admin/status`, header `x-admin-key` (secret `ADMIN_KEY`, local copy in `.dev.vars`).
+- Admin: `POST /api/admin/run?task=ingest|brief` (ingest queues every feed, brief starts the Workflow and returns its id), `GET /api/admin/workflow/:id`, `GET /api/admin/status`, header `x-admin-key` (secret `ADMIN_KEY`, local copy in `.dev.vars`).
+- The Cloudflare observability MCP server is deprecated and fails to parse queue events in the events view; use the calculations view or `npx wrangler tail`.
 
 ## Tests
 

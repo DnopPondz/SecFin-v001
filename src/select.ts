@@ -10,6 +10,32 @@ export interface Article {
   title: string;
   snippet: string;
   published_at: number;
+  cluster_id?: string | null;
+  // Filled by collapseClusters: how many distinct sources carried the story, and which others.
+  coverage?: number;
+  alsoIn?: string[];
+}
+
+// One row per story: the newest article represents its cluster, and the story goes to the
+// section most of its articles were filed under (ties keep the representative's section).
+export function collapseClusters(rows: Article[]): Article[] {
+  const groups = new Map<string, Article[]>();
+  for (const a of rows) {
+    const key = a.cluster_id ?? a.id;
+    const list = groups.get(key) ?? [];
+    list.push(a);
+    groups.set(key, list);
+  }
+  return [...groups.values()].map((members) => {
+    members.sort((p, q) => q.published_at - p.published_at);
+    const rep = members[0];
+    const counts = new Map<Category, number>();
+    for (const m of members) counts.set(m.category, (counts.get(m.category) ?? 0) + 1);
+    const top = Math.max(...counts.values());
+    const category = counts.get(rep.category) === top ? rep.category : [...counts].find(([, c]) => c === top)![0];
+    const sources = [...new Set(members.map((m) => m.source))];
+    return { ...rep, category, coverage: sources.length, alsoIn: sources.filter((s) => s !== rep.source) };
+  });
 }
 
 // Security stories show up in general IT feeds (Blognone, The Register) all the time.
@@ -51,11 +77,12 @@ export interface PickOptions {
 
 export const DEFAULT_PICK: PickOptions = { limit: 18, perSource: 4, duplicateAt: 0.5 };
 
-// Round-robin across sources (newest first within each) so one busy feed cannot fill the
-// shortlist, and drop near-duplicate headlines of the same story.
+// Round-robin across sources so one busy feed cannot fill the shortlist, and drop near-duplicate
+// headlines that clustering missed. Stories carried by more sources go first, then newest first.
 export function pickCandidates(articles: Article[], opts: PickOptions = DEFAULT_PICK): Article[] {
   const bySource = new Map<string, Article[]>();
-  for (const a of [...articles].sort((p, q) => q.published_at - p.published_at)) {
+  const ranked = [...articles].sort((p, q) => (q.coverage ?? 1) - (p.coverage ?? 1) || q.published_at - p.published_at);
+  for (const a of ranked) {
     const list = bySource.get(a.source) ?? [];
     list.push(a);
     bySource.set(a.source, list);

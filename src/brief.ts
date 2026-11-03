@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { BudgetExceeded, MODEL, runJson, type ChatMessage } from "./ai";
-import { pickCandidates, type Article } from "./select";
-import { CATEGORIES, sourceById, type Category } from "./sources";
+import { MODEL, runJson, type ChatMessage } from "./ai";
+import { extractCves, lookupCves, type CveInfo } from "./cve";
+import { collapseClusters, pickCandidates, type Article } from "./select";
+import { sourceById, type Category } from "./sources";
 import { thaiDate } from "./time";
 
 const ITEMS_PER_SECTION = 5;
@@ -23,6 +24,16 @@ export interface BriefItem {
   summary: Bilingual;
   why: Bilingual | null; // null when the AI step was skipped
   severity: "critical" | "high" | "medium" | "low" | null;
+  coverage: number; // distinct sources that carried the story
+  alsoReported: string[]; // names of the other sources
+  sourceText: string; // original headline + snippet, kept so CVE ids come from the publisher, not the model
+  cves: CveInfo[];
+}
+
+export interface Section {
+  items: BriefItem[];
+  neurons: number;
+  ai: boolean;
 }
 
 export interface Brief {
@@ -78,7 +89,10 @@ const JSON_SCHEMA = {
 
 export function buildMessages(category: Category, candidates: Article[]): ChatMessage[] {
   const list = candidates
-    .map((a, i) => `[${i}] (${sourceById(a.source)?.name ?? a.source}, ${a.region === "th" ? "Thailand" : "global"}) ${a.title}\n${a.snippet}`)
+    .map((a, i) => {
+      const reach = (a.coverage ?? 1) > 1 ? `, reported by ${a.coverage} sources` : "";
+      return `[${i}] (${sourceById(a.source)?.name ?? a.source}, ${a.region === "th" ? "Thailand" : "global"}${reach}) ${a.title}\n${a.snippet}`;
+    })
     .join("\n\n");
   return [
     {
@@ -94,6 +108,7 @@ export function buildMessages(category: Category, candidates: Article[]): ChatMe
       content: [
         `Section: ${SECTION_LABEL[category]}.`,
         `Pick the ${ITEMS_PER_SECTION} most significant distinct stories below, most important first. Include Thai stories when they are relevant to Thailand.`,
+        "A story reported by several sources is usually more significant, but judge by impact.",
         "For each: i (the item number), title_th and title_en (short headline), summary_th and summary_en (2 sentences),",
         "why_th and why_en (1 sentence: the practical impact or what a reader in Thailand should check or do),",
         `severity (${category === "cyber" ? "critical, high, medium or low by real-world risk" : "always none"}).`,
@@ -115,6 +130,10 @@ function toItem(a: Article, ai?: z.infer<typeof ItemSchema>): BriefItem {
     summary: ai ? { th: ai.summary_th, en: ai.summary_en } : { th: a.snippet, en: a.snippet },
     why: ai ? { th: ai.why_th, en: ai.why_en } : null,
     severity: ai && ai.severity !== "none" ? ai.severity : null,
+    coverage: a.coverage ?? 1,
+    alsoReported: (a.alsoIn ?? []).map((s) => sourceById(s)?.name ?? s),
+    sourceText: `${a.title} ${a.snippet}`,
+    cves: [],
   };
 }
 
@@ -134,39 +153,48 @@ export function mergePicks(candidates: Article[], raw: unknown): BriefItem[] {
   return items;
 }
 
-export async function buildBrief(env: Env, now = Date.now()): Promise<Brief> {
-  const brief: Brief = {
+// All recent articles across every section, so a story's coverage counts sources in any section.
+async function candidatesFor(env: Env, category: Category, now: number): Promise<Article[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT id, url, source, category, region, lang, title, snippet, published_at, cluster_id FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT 600",
+  )
+    .bind(now - WINDOW_MS)
+    .all<Article>();
+  return pickCandidates(collapseClusters(results).filter((a) => a.category === category));
+}
+
+// Throws when the AI call fails so the Workflow step can retry it; rawSection is the fallback.
+export async function aiSection(env: Env, category: Category, now: number): Promise<Section> {
+  const candidates = await candidatesFor(env, category, now);
+  if (candidates.length === 0) return { items: [], neurons: 0, ai: false };
+  const { data, neurons } = await runJson(env, buildMessages(category, candidates), JSON_SCHEMA, MAX_TOKENS, now);
+  return { items: mergePicks(candidates, data), neurons, ai: true };
+}
+
+// Without AI the page still shows the top stories, just untranslated and ranked by coverage and recency.
+export async function rawSection(env: Env, category: Category, now: number): Promise<Section> {
+  const candidates = await candidatesFor(env, category, now);
+  return { items: candidates.slice(0, ITEMS_PER_SECTION).map((a) => toItem(a)), neurons: 0, ai: false };
+}
+
+// CVE ids are read from the publisher's own headline and snippet, then checked against NVD.
+export async function attachCves(env: Env, items: BriefItem[], now: number): Promise<BriefItem[]> {
+  const ids = [...new Set(items.flatMap((it) => extractCves(it.sourceText)))];
+  if (ids.length === 0) return items;
+  const found = new Map((await lookupCves(env, ids, now)).map((c) => [c.id, c]));
+  return items.map((it) => ({ ...it, cves: extractCves(it.sourceText).flatMap((id) => found.get(id) ?? []) }));
+}
+
+export function assembleBrief(now: number, sections: Record<Category, Section>, notes: string[]): Brief {
+  const all = Object.values(sections);
+  return {
     date: thaiDate(now),
     generatedAt: now,
-    model: null,
-    neurons: 0,
-    sections: { cyber: [], it: [], finance: [] },
-    notes: [],
+    model: all.some((s) => s.ai) ? MODEL : null,
+    neurons: all.reduce((n, s) => n + s.neurons, 0),
+    sections: { cyber: sections.cyber.items, it: sections.it.items, finance: sections.finance.items },
+    notes,
   };
-  for (const category of CATEGORIES) {
-    const { results } = await env.DB.prepare(
-      "SELECT id, url, source, category, region, lang, title, snippet, published_at FROM articles WHERE category = ? AND published_at >= ? ORDER BY published_at DESC LIMIT 120",
-    )
-      .bind(category, now - WINDOW_MS)
-      .all<Article>();
-    const candidates = pickCandidates(results);
-    if (candidates.length === 0) {
-      brief.notes.push(`${category}: no articles in the last 30 hours`);
-      continue;
-    }
-    try {
-      const { data, neurons } = await runJson(env, buildMessages(category, candidates), JSON_SCHEMA, MAX_TOKENS, now);
-      brief.neurons += neurons;
-      brief.model = MODEL;
-      brief.sections[category] = mergePicks(candidates, data);
-    } catch (err) {
-      // Without AI the page still shows the newest headlines, just untranslated and unranked.
-      brief.notes.push(`${category}: ${err instanceof BudgetExceeded ? "Neuron budget reached" : "AI step failed"}, showing raw headlines`);
-      console.error(`brief ${category}:`, err);
-      brief.sections[category] = candidates.slice(0, ITEMS_PER_SECTION).map((a) => toItem(a));
-    }
-  }
-  return brief;
 }
 
 export async function saveBrief(env: Env, brief: Brief): Promise<void> {

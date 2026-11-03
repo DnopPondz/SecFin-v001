@@ -29,19 +29,26 @@ export async function neuronsUsed(env: Env, now = Date.now()): Promise<number> {
   return row?.neurons ?? 0;
 }
 
-async function addNeurons(env: Env, neurons: number, now: number): Promise<void> {
+export async function addNeurons(env: Env, neurons: number, now: number): Promise<void> {
   await env.DB.prepare("INSERT INTO ai_usage (day, neurons) VALUES (?, ?) ON CONFLICT (day) DO UPDATE SET neurons = neurons + excluded.neurons")
     .bind(utcDay(now), neurons)
     .run();
 }
 
+// Refuse a call up front when its worst case would cross DAILY_NEURON_BUDGET.
+export async function assertBudget(env: Env, estimate: number, now: number): Promise<void> {
+  const budget = Number(env.DAILY_NEURON_BUDGET) || 0;
+  if ((await neuronsUsed(env, now)) + estimate > budget) throw new BudgetExceeded("daily Neuron budget reached");
+}
+
+export function gatewayOptions(env: Env): AiOptions | undefined {
+  return env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : undefined;
+}
+
 // One JSON-mode chat call, metered against DAILY_NEURON_BUDGET before it is sent.
 export async function runJson(env: Env, messages: ChatMessage[], schema: object, maxTokens: number, now = Date.now()): Promise<JsonResult> {
-  const budget = Number(env.DAILY_NEURON_BUDGET) || 0;
-  if ((await neuronsUsed(env, now)) + worstCaseNeurons(messages, maxTokens) > budget) {
-    throw new BudgetExceeded("daily Neuron budget reached");
-  }
-  const options = env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : undefined;
+  await assertBudget(env, worstCaseNeurons(messages, maxTokens), now);
+  const options = gatewayOptions(env);
   const out = (await env.AI.run(
     MODEL as keyof AiModels,
     {

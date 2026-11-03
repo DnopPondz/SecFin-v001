@@ -9,9 +9,9 @@
   // Static frontend. Asset requests are served without invoking the Worker.
   "assets": { "directory": "./public" },
   "ai": { "binding": "AI" },
-  // Every 30 minutes: fetch the 3 feeds that waited longest. 22:30 UTC = 05:30 Thai time: build the brief.
+  // Hourly: queue every feed. 22:30 UTC = 05:30 Thai time: start the brief Workflow.
   // Workers Free allows 5 Cron Triggers per account; this uses 2. Keep BRIEF_CRON in src/index.ts in sync.
-  "triggers": { "crons": ["*/30 * * * *", "30 22 * * *"] },
+  "triggers": { "crons": ["0 * * * *", "30 22 * * *"] },
   "d1_databases": [
     {
       "binding": "DB",
@@ -21,12 +21,23 @@
     }
   ],
   "kv_namespaces": [{ "binding": "CACHE", "id": "d56788bcfbd445e48290247e4284db18" }],
-  // Per-IP request ceiling (approximate, per Cloudflare location) so nobody can burn the free daily quotas.
-  "ratelimits": [{ "name": "API_LIMITER", "namespace_id": "2001", "simple": { "limit": 60, "period": 60 } }],
-  // A full brief costs about 300 Neurons; 3,000 leaves room for retries and manual runs.
-  // AI_GATEWAY_ID stays empty until a gateway is created in the dashboard (the API token has no AI Gateway permission).
+  // bge-m3 vectors (1024 dimensions, cosine) for story clustering and search.
+  "vectorize": [{ "binding": "VECTORS", "index_name": "secfin-articles" }],
+  // One message per feed, one feed per consumer invocation (10 ms CPU each on Free), one at a time.
+  "queues": {
+    "producers": [{ "binding": "INGEST_QUEUE", "queue": "secfin-ingest" }],
+    "consumers": [{ "queue": "secfin-ingest", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 2, "max_concurrency": 1 }]
+  },
+  "workflows": [{ "name": "secfin-brief", "binding": "BRIEF_WORKFLOW", "class_name": "BriefWorkflow" }],
+  // Per-IP request ceilings (approximate, per Cloudflare location) so nobody can burn the free daily quotas.
+  "ratelimits": [
+    { "name": "API_LIMITER", "namespace_id": "2001", "simple": { "limit": 60, "period": 60 } },
+    { "name": "SEARCH_LIMITER", "namespace_id": "2002", "simple": { "limit": 10, "period": 60 } }
+  ],
+  // A full brief costs about 160 Neurons; 3,000 leaves room for retries, embeddings and searches.
+  // AI Gateway secfin-brief (created 2026-11-03): request logs plus a 30 requests/minute ceiling.
   "vars": {
     "DAILY_NEURON_BUDGET": "3000",
-    "AI_GATEWAY_ID": ""
+    "AI_GATEWAY_ID": "secfin-brief"
   }
 }

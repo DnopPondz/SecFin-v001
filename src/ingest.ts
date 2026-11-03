@@ -1,30 +1,50 @@
+import { embedPending } from "./cluster";
 import { parseFeed } from "./feed";
 import { classify } from "./select";
-import { SOURCES, type Source } from "./sources";
+import { SOURCES, sourceById, type Source } from "./sources";
 
-// Feeds per run. Each cron invocation gets 10 ms CPU on Workers Free; regex parsing of a
-// 300 KB feed takes about a millisecond, so three feeds leave headroom. With a 30-minute cron
-// every feed is refreshed roughly every 2.5 hours, which is enough for a daily brief.
-const FEEDS_PER_RUN = 3;
 const ITEMS_PER_FEED = 20;
 const RETENTION_DAYS = 14;
+// Messages are spread out so feeds are fetched one at a time and each batch of vectors is
+// queryable before the next feed is clustered against it.
+const STAGGER_SECONDS = 30;
+
+export interface IngestMessage {
+  source: string;
+}
 
 export interface IngestResult {
   source: string;
   status: string;
   count: number;
+  embedded: number;
 }
 
-export async function ingest(env: Env, now = Date.now()): Promise<IngestResult[]> {
-  const { results } = await env.DB.prepare("SELECT source, last_run FROM feed_state").all<{ source: string; last_run: number }>();
-  const lastRun = new Map(results.map((r) => [r.source, r.last_run]));
-  const due = [...SOURCES].sort((a, b) => (lastRun.get(a.id) ?? 0) - (lastRun.get(b.id) ?? 0)).slice(0, FEEDS_PER_RUN);
-  return Promise.all(due.map((s) => ingestOne(env, s, now)));
+// Hourly cron: one queue message per feed. 13 feeds x 24 runs x 3 operations (write, read,
+// delete) is about 940 of the 10,000 free Queues operations a day.
+export async function enqueueFeeds(env: Env): Promise<number> {
+  await env.INGEST_QUEUE.sendBatch(SOURCES.map((s, i) => ({ body: { source: s.id }, delaySeconds: i * STAGGER_SECONDS })));
+  return SOURCES.length;
 }
 
-async function ingestOne(env: Env, source: Source, now: number): Promise<IngestResult> {
+// Queue consumer, one feed per invocation so each gets its own 10 ms CPU budget.
+export async function handleIngest(batch: MessageBatch<IngestMessage>, env: Env): Promise<void> {
+  for (const msg of batch.messages) {
+    const source = sourceById(msg.body.source);
+    if (!source) {
+      msg.ack(); // a feed removed from SOURCES while its message was queued
+      continue;
+    }
+    const result = await ingestOne(env, source);
+    console.log("ingest", result);
+    msg.ack();
+  }
+}
+
+export async function ingestOne(env: Env, source: Source, now = Date.now()): Promise<IngestResult> {
   let status = "ok";
   let count = 0;
+  let embedded = 0;
   try {
     const res = await fetch(source.url, {
       headers: { "user-agent": "SecFinBrief/0.1 (personal news digest)", accept: "application/rss+xml, application/atom+xml, application/xml, text/xml" },
@@ -58,14 +78,27 @@ async function ingestOne(env: Env, source: Source, now: number): Promise<IngestR
   } catch (err) {
     status = String(err instanceof Error ? err.message : err).slice(0, 120);
   }
+  // Also picks up articles whose embedding failed on an earlier run.
+  try {
+    embedded = await embedPending(env, source.id, now);
+  } catch (err) {
+    console.error(`embed ${source.id}:`, err);
+  }
   await env.DB.prepare(
     "INSERT INTO feed_state (source, last_run, last_status, last_count) VALUES (?, ?, ?, ?) ON CONFLICT (source) DO UPDATE SET last_run = excluded.last_run, last_status = excluded.last_status, last_count = excluded.last_count",
   ).bind(source.id, now, status, count).run();
-  return { source: source.id, status, count };
+  return { source: source.id, status, count, embedded };
 }
 
-export async function pruneArticles(env: Env, now = Date.now()): Promise<void> {
-  await env.DB.prepare("DELETE FROM articles WHERE fetched_at < ?").bind(now - RETENTION_DAYS * 86_400_000).run();
+// Vectors go first: Vectorize holds 5M stored dimensions on Free (about 4,800 bge-m3 vectors),
+// so old ones must not linger after their rows are gone.
+export async function pruneArticles(env: Env, now = Date.now()): Promise<number> {
+  const cutoff = now - RETENTION_DAYS * 86_400_000;
+  const { results } = await env.DB.prepare("SELECT id FROM articles WHERE fetched_at < ? AND embedded = 1 LIMIT 1000").bind(cutoff).all<{ id: string }>();
+  if (results.length > 0) await env.VECTORS.deleteByIds(results.map((r) => r.id));
+  const out = await env.DB.prepare("DELETE FROM articles WHERE fetched_at < ?").bind(cutoff).run();
+  await env.DB.prepare("DELETE FROM cves WHERE checked_at < ?").bind(cutoff).run();
+  return out.meta.changes ?? 0;
 }
 
 async function sha256(s: string): Promise<string> {
