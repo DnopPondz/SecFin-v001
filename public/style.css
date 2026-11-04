@@ -600,7 +600,7 @@ a.media:hover img { transform: scale(1.02); }
 .report-note { margin: 6px 0 0; font-size: 0.86rem; color: var(--muted); }
 
 /* Source type chips: official sources get an outlined chip so they stand out a little. */
-.chip.tier { font-size: 0.7rem; padding: 0 8px; }
+.chip.tier { font-size: 0.7rem; padding: 0 8px; white-space: nowrap; }
 .chip.tier.official { background: transparent; border: 1px solid var(--link); color: var(--link); font-weight: 600; }
 .chip.tier.mainstream { color: var(--text); }
 .source-box .chip.tier { vertical-align: 1px; }
@@ -627,3 +627,4 @@ a.media:hover img { transform: scale(1.02); }
 .tiers dd { margin: 0; color: var(--muted); }
 .source-group h2 { border-top: 2px solid var(--text); padding-top: 8px; }
 .note-cell { color: var(--muted); font-size: 0.82rem; min-width: 160px; }
+.source-group td:nth-child(-n+4) { white-space: nowrap; }
