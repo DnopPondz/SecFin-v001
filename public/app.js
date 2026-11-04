@@ -355,6 +355,64 @@
     }
   }
 
+  // Section menu: glide to the section (just below the sticky menu bar), sweep a line under its
+  // title on arrival, and keep a pill under whichever section is being read.
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  const nav = $(".sections nav");
+  const pill = el("span", { class: "nav-pill", "aria-hidden": "true" });
+  nav.prepend(pill);
+  const links = [...nav.querySelectorAll("a[href^='#']")];
+
+  function movePill(a) {
+    if (!a) { pill.classList.remove("on"); return; }
+    pill.style.transform = `translateX(${a.offsetLeft}px)`;
+    pill.style.width = `${a.offsetWidth}px`;
+    pill.classList.add("on");
+    // On phones the menu scrolls sideways; keep the active item in view.
+    const left = a.offsetLeft - nav.scrollLeft;
+    if (left < 0 || left + a.offsetWidth > nav.clientWidth) nav.scrollTo({ left: a.offsetLeft - 16, behavior: reducedMotion.matches ? "auto" : "smooth" });
+  }
+
+  function setActive(id) {
+    for (const a of links) {
+      if (a.getAttribute("href") === `#${id}`) a.setAttribute("aria-current", "true");
+      else a.removeAttribute("aria-current");
+    }
+    movePill(links.find((a) => a.getAttribute("href") === `#${id}`));
+  }
+
+  nav.addEventListener("click", (e) => {
+    const a = e.target.closest("a[href^='#']");
+    const target = a && document.querySelector(a.getAttribute("href"));
+    if (!target) return;
+    e.preventDefault();
+    const offset = $(".sections").offsetHeight + 12;
+    window.scrollTo({ top: target.getBoundingClientRect().top + window.scrollY - offset, behavior: reducedMotion.matches ? "auto" : "smooth" });
+    history.replaceState(null, "", `${location.pathname}${location.search}${a.getAttribute("href")}`);
+    setActive(target.id);
+    let done = false;
+    const arrive = () => {
+      if (done) return;
+      done = true;
+      target.classList.remove("arrive");
+      void target.offsetWidth;
+      target.classList.add("arrive");
+    };
+    window.addEventListener("scrollend", arrive, { once: true });
+    setTimeout(arrive, 900); // browsers without scrollend
+  });
+
+  // The section whose top has passed the upper third of the screen is the one being read.
+  const sectionEls = links.map((a) => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+  const spy = new IntersectionObserver((entries) => {
+    if (window.scrollY < 200) return; // still on the hero: no section is being read yet
+    const visible = entries.filter((en) => en.isIntersecting).sort((p, q) => p.boundingClientRect.top - q.boundingClientRect.top)[0];
+    if (visible) setActive(visible.target.id);
+  }, { rootMargin: "-30% 0px -60% 0px" });
+  sectionEls.forEach((s) => spy.observe(s));
+  window.addEventListener("scroll", () => { if (window.scrollY < 200) setActive(null); }, { passive: true });
+  window.addEventListener("resize", () => movePill(links.find((a) => a.hasAttribute("aria-current"))));
+
   $("#day").addEventListener("change", (e) => load(e.target.value));
   $("#search").addEventListener("submit", (e) => {
     e.preventDefault();

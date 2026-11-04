@@ -112,9 +112,32 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .ticker ul { animation: none; }
   .ticker li[aria-hidden="true"] { display: none; }
 }
-.ticker a { text-decoration: none; color: var(--muted); }
-.ticker a:hover { color: var(--text); }
-.ticker li.fresh a { color: var(--text); font-weight: 500; }
+/* Source in muted small caps, headline in full text colour, so each item reads at a glance. */
+.ticker { font-size: 0.88rem; }
+.ticker a { text-decoration: none; color: var(--text); }
+.ticker a:hover .tk-title { text-decoration: underline; text-underline-offset: 3px; }
+.tk-src { color: var(--muted); font-size: 0.78rem; font-weight: 600; margin-right: 6px; }
+.ticker li.fresh .tk-src { color: var(--accent); }
+
+/* Phones: the ticker gets its own row and shows one headline at a time (up to two lines),
+   sliding up to the next every few seconds. Touch or focus holds the current one. */
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; row-gap: 0; padding-bottom: 8px; }
+  .topbar .ticker { order: 3; flex: 1 1 100%; align-items: flex-start; padding-top: 6px; border-top: 1px solid var(--line); }
+  .topbar .ticker b { padding-top: 1px; }
+  .topbar .live-dot { margin-top: 7px; }
+}
+.ticker.rotate .ticker-viewport { -webkit-mask-image: none; mask-image: none; }
+.ticker.rotate ul { display: grid; width: auto; min-height: 2.9em; animation: none; white-space: normal; }
+.ticker.rotate li {
+  grid-area: 1 / 1; padding-right: 0; opacity: 0; transform: translateY(70%); pointer-events: none;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s;
+}
+.ticker.rotate li.current { opacity: 1; transform: none; pointer-events: auto; }
+.ticker.rotate li.leaving { opacity: 0; transform: translateY(-70%); }
+.ticker.rotate a { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45; }
+.ticker.rotate li[aria-hidden="true"] { display: block; }
+@media (prefers-reduced-motion: reduce) { .ticker.rotate li { transition: none; } }
 .controls { display: flex; gap: 6px; margin-left: auto; }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 30px; min-width: 30px; padding: 0 8px;
@@ -130,10 +153,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .sections { position: sticky; top: 0; z-index: 5; background: var(--bg); border-top: 3px double var(--line); border-bottom: 1px solid var(--line); }
 .sections .wrap { display: flex; align-items: center; gap: 4px; min-height: 46px; }
-.sections nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.sections nav { position: relative; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .sections nav::-webkit-scrollbar { display: none; }
-.sections nav a { padding: 6px 12px; border-radius: 6px; text-decoration: none; font-weight: 500; font-size: 0.95rem; white-space: nowrap; }
-.sections nav a:hover, .sections nav a[aria-current="page"] { background: var(--chip); }
+.sections nav a { position: relative; z-index: 1; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-weight: 500; font-size: 0.95rem; white-space: nowrap; transition: color 0.25s; }
+.sections nav a:hover { background: var(--chip); }
+.sections nav a[aria-current] { color: var(--accent); }
+/* A pill that glides under the section being read (set by app.js). */
+.nav-pill {
+  position: absolute; z-index: 0; top: 0; bottom: 0; left: 0; width: 0; border-radius: 6px; background: var(--chip); opacity: 0;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), width 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s;
+}
+.nav-pill.on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .nav-pill { transition: none; } }
 .search { margin-left: auto; flex: 0 1 240px; min-width: 140px; }
 @media (max-width: 640px) {
   .sections .wrap { flex-wrap: wrap; padding-bottom: 8px; }
@@ -169,16 +200,24 @@ a.media:hover img { transform: scale(1.02); }
 .media .ph { position: absolute; inset: 0; display: grid; place-items: center; font: 700 1.1rem var(--serif); color: var(--muted); background: linear-gradient(135deg, var(--chip), var(--surface)); }
 
 /* Hero */
-.hero { display: grid; grid-template-columns: 1.35fr 1fr; gap: 28px; align-items: center; padding-bottom: 28px; border-bottom: 1px solid var(--line); }
-.hero .media { margin: 0; }
-.hero .headline { font-size: clamp(1.4rem, 2.6vw, 1.9rem); }
-.hero .dek { font-size: 1.05rem; }
+/* The image fills the height of the text column (cropped to fit, capped so tall text does not
+   turn it into a narrow strip); the summary is clamped so the two columns stay close in height. */
+.hero { display: grid; grid-template-columns: 1.25fr 1fr; gap: 28px; align-items: stretch; padding-bottom: 28px; border-bottom: 1px solid var(--line); }
+.hero .media { margin: 0; aspect-ratio: auto; height: 100%; min-height: 300px; max-height: 460px; }
+.hero .headline { font-size: clamp(1.35rem, 2.3vw, 1.75rem); }
+.hero .dek { font-size: 1.02rem; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 760px) { .hero .media { aspect-ratio: 16 / 9; height: auto; min-height: 0; max-height: none; } }
 @media (max-width: 760px) { .hero { grid-template-columns: 1fr; gap: 14px; } }
 
 /* Section blocks */
 .block { padding-top: 30px; scroll-margin-top: 60px; }
 .block-head { display: flex; align-items: baseline; gap: 12px; border-top: 2px solid var(--text); padding-top: 8px; margin-bottom: 16px; }
-.block-head h2 { margin: 0; font: 700 1.3rem var(--serif); }
+.block-head h2 { position: relative; margin: 0; font: 700 1.3rem var(--serif); }
+/* On arrival from the section menu, an accent line sweeps under the section title. */
+.block-head h2::after { content: ""; position: absolute; left: 0; bottom: -4px; height: 3px; width: 100%; background: var(--accent); border-radius: 2px; transform: scaleX(0); transform-origin: left; opacity: 0; }
+.block.arrive .block-head h2::after { animation: title-sweep 1.1s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes title-sweep { 0% { transform: scaleX(0); opacity: 1; } 55% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(1); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .block.arrive .block-head h2::after { animation: none; } }
 .block-head .count { color: var(--muted); font-size: 0.85rem; }
 .block-body { display: grid; grid-template-columns: 1.25fr 1fr; gap: 24px; }
 .block-body .lead .headline { font-size: 1.3rem; }

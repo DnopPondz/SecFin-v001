@@ -121,10 +121,14 @@
     }
   }
 
-  const TICKER_PX_PER_SECOND = 50;
+  const TICKER_PX_PER_SECOND = 38;
+  const ROTATE_MS = 5000;
+  const HOLD_AFTER_TOUCH_MS = 8000;
 
-  // Live ticker from the LiveFeed Durable Object. The headlines scroll on their own: the list is
-  // rendered twice and the track slides by half its width, so the loop has no visible seam.
+  // Live ticker from the LiveFeed Durable Object. Wide screens: the headlines scroll on their own;
+  // the list is rendered twice and the track slides by half its width, so the loop has no seam.
+  // Phones: one headline at a time slides up to the next every few seconds, which stays readable
+  // on a narrow screen. Hover, focus or a touch holds the current headline.
   function startTicker() {
     const box = document.querySelector("#ticker");
     const list = document.querySelector("#ticker-list");
@@ -132,29 +136,85 @@
     const viewport = el("div", { class: "ticker-viewport" });
     list.replaceWith(viewport);
     viewport.append(list);
+    const narrow = matchMedia("(max-width: 640px)");
     let items = [];
     let delay = 2000;
+    let index = 0;
+    let timer = null;
+    let heldUntil = 0;
 
-    const draw = () => {
-      const lis = (copy) => items.map((it) => {
-        const a = link(it.url, `${it.sourceName}: ${it.title}`, "ticker", it.category, it.url);
-        // The second copy is only there for the loop; keep it out of tab order and screen readers.
-        if (copy) a.tabIndex = -1;
-        return el("li", { class: it.fresh ? "fresh" : null, "aria-hidden": copy ? "true" : null }, a);
-      });
-      list.replaceChildren(...lis(false), ...lis(true));
-      box.hidden = items.length === 0;
+    const item = (it, copy) => {
+      const a = link(it.url, "", "ticker", it.category, it.url);
+      a.append(el("span", { class: "tk-src" }, it.sourceName), el("span", { class: "tk-title" }, it.title));
+      // Loop copies and hidden rotator items stay out of tab order and screen readers.
+      if (copy) a.tabIndex = -1;
+      return el("li", { class: it.fresh ? "fresh" : null, "aria-hidden": copy ? "true" : null }, a);
+    };
+
+    const drawMarquee = () => {
+      box.classList.remove("rotate");
+      list.replaceChildren(...items.map((it) => item(it, false)), ...items.map((it) => item(it, true)));
       // Constant speed whatever the number of headlines; restart so new items start from the left.
       requestAnimationFrame(() => {
-        list.style.setProperty("--ticker-duration", `${Math.max(20, list.scrollWidth / 2 / TICKER_PX_PER_SECOND)}s`);
+        list.style.setProperty("--ticker-duration", `${Math.max(25, list.scrollWidth / 2 / TICKER_PX_PER_SECOND)}s`);
         list.style.animation = "none";
         void list.offsetWidth;
         list.style.animation = "";
       });
     };
+
+    const drawRotate = () => {
+      box.classList.add("rotate");
+      list.style.animation = "none";
+      index = Math.min(index, items.length - 1);
+      list.replaceChildren(...items.map((it, i) => {
+        const li = item(it, i !== index);
+        if (i === index) li.classList.add("current");
+        return li;
+      }));
+    };
+
+    const step = () => {
+      const lis = list.children;
+      if (lis.length < 2) return;
+      const prev = lis[index];
+      prev.classList.remove("current");
+      prev.classList.add("leaving");
+      prev.setAttribute("aria-hidden", "true");
+      prev.querySelector("a").tabIndex = -1;
+      setTimeout(() => prev.classList.remove("leaving"), 600);
+      index = (index + 1) % lis.length;
+      const next = lis[index];
+      next.classList.add("current");
+      next.removeAttribute("aria-hidden");
+      next.querySelector("a").removeAttribute("tabindex");
+    };
+
+    const schedule = () => {
+      clearInterval(timer);
+      if (!narrow.matches || items.length < 2) return;
+      timer = setInterval(() => {
+        if (document.hidden || Date.now() < heldUntil || box.matches(":hover, :focus-within")) return;
+        step();
+      }, ROTATE_MS);
+    };
+
+    const draw = () => {
+      box.hidden = items.length === 0;
+      if (items.length === 0) return;
+      if (narrow.matches) drawRotate();
+      else drawMarquee();
+      schedule();
+    };
+
+    box.addEventListener("touchstart", () => { heldUntil = Date.now() + HOLD_AFTER_TOUCH_MS; }, { passive: true });
+    narrow.addEventListener("change", draw);
+
     const show = (incoming, fresh) => {
       const seen = new Set(incoming.map((it) => it.url));
       items = [...incoming.map((it) => ({ ...it, fresh })), ...items.filter((it) => !seen.has(it.url))].slice(0, 15);
+      // New headlines go to the front; the rotator starts again from the newest.
+      if (fresh) index = 0;
       draw();
     };
     const connect = () => {
