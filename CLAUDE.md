@@ -30,8 +30,8 @@ Everything must run on the Cloudflare **Workers Free plan**. Set by the owner, n
 ## Account and resources
 
 - Cloudflare account: **webdev** (`80d3023818cd51d00d21cc21c581318a`), dedicated to this project. Never create or change anything in Pondwachi.th@gmail.com's Account, and do not use it as an AI fallback.
-- Source: GitHub `DnopPondz/llfout`, branch `main` (history reset on 2026-11-03 when livelife was retired). No Workers Builds connection.
-- Worker `secfin-brief`, live at https://secfin-brief.webdev-80d.workers.dev. Deploy with `npx wrangler deploy`; credentials come from the gitignored `.env`.
+- Source: GitHub `DnopPondz/SecFin-v001` (renamed from `llfout`; GitHub redirects the old URL), branch `main` (history reset on 2026-11-03 when livelife was retired).
+- Worker `secfin-brief`, live at https://secfin-brief.webdev-80d.workers.dev. Deploys through Workers Builds on every push to `main` (connected 2026-11-04): build command `npm run check` (typecheck and tests; a failure stops the deploy), deploy command `npm run deploy` (D1 migrations, then `wrangler deploy`). Free plan: 3,000 build minutes a month, 1 build at a time. The build token needs D1 Edit on top of the permissions Cloudflare grants by default, or the migration step fails. `npm run deploy` from this machine still works; credentials come from the gitignored `.env`. Do not deploy by hand and push different code: the next build overwrites it.
 - D1 `secfin-db` (`4ac76ae1-e986-41ad-9ed6-13220d43564e`, APAC). KV `secfin-cache` (`d56788bcfbd445e48290247e4284db18`).
 - Vectorize `secfin-articles` (1024 dims, cosine). Queue `secfin-ingest`. Workflow `secfin-brief` (class `BriefWorkflow`). AI Gateway `secfin-brief` (logs, 30 requests/minute).
 - Durable Object `LiveFeed` (SQLite, one instance "global"). Browser Run binding `BROWSER`. Analytics SQL binding `ANALYTICS_SQL`. Turnstile widget "secfin-brief ask" (site key in `public/app.js`, secret `TURNSTILE_SECRET`, local copy in `.dev.vars`).

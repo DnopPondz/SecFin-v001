@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "check": "tsc --noEmit && node scripts/test.mjs",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs"
