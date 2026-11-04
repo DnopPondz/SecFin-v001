@@ -4,7 +4,7 @@ import {
   cached, storyReport, timingSafeEqualStr, traffic, validView, verifySession, type ViewBody,
 } from "./adms";
 import { BudgetExceeded, neuronsUsed } from "./ai";
-import { ask, validHistory } from "./ask";
+import { ask, isThai, validHistory } from "./ask";
 import type { Brief } from "./brief";
 import { popular, recordClick, validClick, type ClickBody } from "./clicks";
 import { enqueueFeeds, handleIngest, type IngestMessage } from "./ingest";
@@ -148,7 +148,10 @@ app.post("/api/ask", async (c) => {
     return c.json({ ok: true, ...(await ask(c.env, q, Date.now(), validHistory(body.history))) });
   } catch (err) {
     if (err instanceof BudgetExceeded) return c.json({ ok: false, error: "วันนี้ใช้โควตา AI ครบแล้ว ลองใหม่พรุ่งนี้" }, 503);
-    throw err;
+    // A cut-off or malformed reply: tell the reader what to try instead of a bare 500.
+    console.error("ask:", err);
+    const thai = isThai(q);
+    return c.json({ ok: false, error: thai ? "ตอบไม่สำเร็จ ลองถามให้แคบลง เช่น ระบุชื่อผลิตภัณฑ์หรือช่วงเวลา" : "Could not answer. Try a narrower question, such as a product name or time period." }, 502);
   }
 });
 

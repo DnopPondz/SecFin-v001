@@ -5,7 +5,9 @@ import { search, type SearchHit } from "./search";
 // Retrieval-augmented answers over the 14-day archive. One question costs about 35 Neurons
 // (8 snippets in, a short answer out), and it can never eat into the brief's reserve.
 const TOP_K = 8;
-const MAX_TOKENS = 700;
+// 700 was too few on 2026-11-04: a Thai answer listing several Fortinet PSIRT advisories was cut
+// off. Only the tokens actually generated are billed, so the headroom costs nothing on short answers.
+const MAX_TOKENS = 1200;
 
 export interface AskSource {
   n: number;
