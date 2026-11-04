@@ -26,6 +26,7 @@ interface Env {
   TURNSTILE_SECRET?: string;
   // Free EIA open-data key (https://www.eia.gov/opendata/register.php) for Brent and WTI. Oil is skipped without it.
   EIA_API_KEY?: string;
+  OPENAQ_API_KEY?: string;
   // Hard ceiling on Neurons per UTC day for this Worker; stays well under the 10,000 free allocation.
   DAILY_NEURON_BUDGET: string;
   // AI Gateway id. Empty means calls go straight to Workers AI.

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { priorityOf } from "../src/brief";
 import { collapseClusters, type Article } from "../src/select";
 import { PROVINCES, normalizeSettings, watchMatcher } from "../src/settings";
-import { goldBahtThb, mergeFuel, mergeGold, parseAir, parseEia, parseFx, parsePtt, pm25Level } from "../src/widgets";
+import { AIR_STATIONS, goldBahtThb, mergeAir, mergeFuel, mergeGold, parseAir, parseEia, parseFx, parseMeasurements, parsePtt, parseSensorList, pm25Level } from "../src/widgets";
 
 test("watchMatcher matches Latin terms as whole words, any case", () => {
   const m = watchMatcher(["Fortinet", "SAP", "C++"]);
@@ -64,7 +64,64 @@ test("parseAir maps Open-Meteo locations to provinces in order", () => {
   assert.equal(air.readings[0].trend[0], 31); // oldest hour dropped
   assert.equal(air.readings[0].avg24, 42.8); // (31 + ... + 53 + 60) / 24 = 42.75
   assert.equal(air.readings[1].avg24, null); // only the current value, too few hours for a mean
+  assert.equal(air.readings[0].source, "model");
+  assert.equal(air.readings[0].hours.at(-1), "09:00");
+  assert.equal(air.readings[0].hours[0], "10:00");
   assert.throws(() => parseAir(raw.slice(1)));
+});
+
+const hourRow = (utc: string, value: number | null) => {
+  const local = new Date(Date.parse(utc) + 7 * 3600e3).toISOString().slice(0, 19) + "+07:00";
+  return { value, period: { datetimeTo: { utc, local } } };
+};
+
+test("parseMeasurements keeps the last 24 hours with each point's own hour", () => {
+  const now = Date.parse("2026-11-04T06:20:00Z");
+  const rows = [
+    hourRow("2026-11-03T05:00:00Z", 9), // more than 24 h before the newest value
+    hourRow("2026-11-03T07:00:00Z", 10),
+    hourRow("2026-11-04T06:00:00Z", 11.54), // out of order on purpose
+    hourRow("2026-11-03T08:00:00Z", -1), // Air4Thai's missing-value marker
+    hourRow("2026-11-03T20:00:00Z", 12),
+  ];
+  const s = parseMeasurements({ results: rows }, now)!;
+  assert.equal(s.time, "2026-11-04T13:00");
+  assert.deepEqual(s.trend, [10, 12, 11.5]);
+  assert.deepEqual(s.hours, ["14:00", "03:00", "13:00"]);
+});
+
+test("parseMeasurements rejects a sensor whose newest value is over 3 hours old", () => {
+  const now = Date.parse("2026-11-04T06:20:00Z");
+  assert.equal(parseMeasurements({ results: [hourRow("2026-11-04T03:00:00Z", 10)] }, now), null);
+  assert.equal(parseMeasurements({ results: [] }, now), null);
+});
+
+test("parseSensorList keeps only PM2.5 sensors", () => {
+  const map = parseSensorList({ results: [
+    { id: 225674, name: "Municipality Office, Nan", sensors: [{ id: 1, parameter: { id: 1 } }, { id: 1304191, parameter: { id: 2 } }, { id: 16312769, parameter: { id: 2 } }] },
+    { id: 9, name: "Ozone only", sensors: [{ id: 3, parameter: { id: 10 } }] },
+  ] }, 5);
+  assert.deepEqual(map.sensors, { 225674: [1304191, 16312769] });
+  assert.equal(map.names[225674], "Municipality Office, Nan");
+  assert.equal(map.at, 5);
+});
+
+test("mergeAir prefers stations and falls back to the model per province", () => {
+  const model = mergeAir(null, {});
+  assert.equal(model.readings.length, PROVINCES.length);
+  assert.equal(model.readings[0].avg24, null);
+  const modelAir = { time: "2026-11-04T13:00", readings: PROVINCES.map((p) => ({ id: p.id, name: { th: p.th, en: p.en }, source: "model" as const, time: "2026-11-04T13:00", pm25: 3, avg24: 4, trend: [4], hours: ["13:00"] })) };
+  const air = mergeAir(modelAir, { nan: { time: "2026-11-04T12:00", trend: [16.5, 16.8], hours: ["11:00", "12:00"], station: "Municipality Office, Nan" } });
+  const nan = air.readings.find((r) => r.id === "nan")!;
+  assert.equal(nan.source, "station");
+  assert.equal(nan.avg24, 16.8); // Air4Thai's value is already the 24 h mean
+  assert.equal(nan.pm25, null);
+  assert.equal(air.readings.find((r) => r.id === "tak")!.source, "model");
+  assert.equal(air.time, "2026-11-04T13:00");
+});
+
+test("every province has a station", () => {
+  assert.deepEqual(Object.keys(AIR_STATIONS).sort(), PROVINCES.map((p) => p.id).sort());
 });
 
 test("parseFx inverts THB-based rates and quotes yen per 100", () => {

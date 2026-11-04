@@ -13,7 +13,9 @@
     footer: "สรุปโดย AI จากหัวข้อและเนื้อหาย่อของแหล่งข่าว รูปภาพเป็นของแหล่งข่าวต้นฉบับ โปรดอ่านต้นฉบับก่อนตัดสินใจ",
     edition: (d) => `ฉบับวันที่ ${d}`,
     airTitle: "ฝุ่น PM2.5 ภาคเหนือ", airAvg: "เฉลี่ย 24 ชม.", airNow: (v) => `ล่าสุด ${v} µg/m³`, air24: "24 ชั่วโมงที่ผ่านมา",
-    airSrc: (time) => `ค่าประมาณจากแบบจำลอง CAMS ผ่าน Open-Meteo ไม่ใช่ค่าจากสถานีตรวจวัด เกณฑ์สีตามกรมควบคุมมลพิษ · ข้อมูล ${time} น.`,
+    airSrc: (time) => `ค่าเฉลี่ย 24 ชม. จากสถานีของกรมควบคุมมลพิษ (Air4Thai) ผ่าน OpenAQ เกณฑ์สีตามกรมควบคุมมลพิษ · ข้อมูล ${time} น.`,
+    airModel: "≈ ค่าประมาณจากแบบจำลอง CAMS (Open-Meteo) ใช้เมื่อสถานีไม่มีข้อมูล มักต่ำกว่าค่าจริง",
+    airStation: (s) => `สถานี ${s}`, airEstimate: "ค่าประมาณ ไม่ใช่ค่าจากสถานี",
     airPick: "จังหวัดของคุณ", airLimit: "37.5 เริ่มมีผลต่อสุขภาพ",
     marketsTitle: "ตลาด", btc24: "24 ชม.", mkFx: "ค่าเงิน", mkCommodities: "สินค้าโภคภัณฑ์", mkCrypto: "คริปโต",
     gold: "ทองคำ", goldBaht: (v) => `≈ ทองแท่ง 96.5% บาทละ ${v} บาท (ประมาณจากราคาโลก ไม่ใช่ราคาสมาคมค้าทองคำ)`,
@@ -32,7 +34,9 @@
     footer: "AI summaries of publisher headlines and snippets. Images belong to the original publishers. Read the original before acting on it.",
     edition: (d) => `Edition of ${d}`,
     airTitle: "PM2.5 in the North", airAvg: "24 h mean", airNow: (v) => `Latest ${v} µg/m³`, air24: "Last 24 hours",
-    airSrc: (time) => `CAMS model estimate via Open-Meteo, not a station reading. Colours follow the Thai Pollution Control Department bands · data ${time}`,
+    airSrc: (time) => `24 h means from Pollution Control Department stations (Air4Thai) via OpenAQ. Colours follow the department's bands · data ${time}`,
+    airModel: "≈ CAMS model estimate (Open-Meteo), used when a station has no data; usually lower than measured",
+    airStation: (s) => `Station: ${s}`, airEstimate: "estimate, not a station reading",
     airPick: "Your province", airLimit: "37.5 health effects begin",
     marketsTitle: "Markets", btc24: "24 h", mkFx: "Currencies", mkCommodities: "Commodities", mkCrypto: "Crypto",
     gold: "Gold", goldBaht: (v) => `≈ ${v} THB per baht-weight of 96.5% bar gold (estimated from spot, not the Gold Traders Association price)`,
@@ -202,24 +206,30 @@
     const pick = el("select", { id: "air-home", "aria-label": t("airPick") },
       ...air.readings.map((p) => el("option", { value: p.id, selected: p.id === r.id ? "" : null }, p.name[L])));
     pick.addEventListener("change", () => { SF.store.set("airHome", pick.value); renderAir(); });
-    // Hours for the readout: the trend ends at the model hour and steps back one hour per point.
-    const endHour = Number(fmtTime(air.time).slice(0, 2)) || 0;
-    const hourLabel = (i) => `${String((endHour - (r.trend.length - 1 - i) + 48) % 24).padStart(2, "0")}:00`;
+    // Hours for the readout: each point's own hour when the server sends them (station series can
+    // skip hours), otherwise one hour per point back from the reading time.
+    const endHour = Number(fmtTime(r.time || air.time).slice(0, 2)) || 0;
+    const hourLabel = (i) => r.hours?.[i] ?? `${String((endHour - (r.trend.length - 1 - i) + 48) % 24).padStart(2, "0")}:00`;
+    const isModel = (p) => p.source !== "station";
     const others = air.readings.filter((p) => p.id !== r.id).sort((a, b) => (b.avg24 ?? -1) - (a.avg24 ?? -1));
+    const detail = isModel(r)
+      ? `${t("airAvg")} · ${t("airNow", pm(r.pm25))} · ${t("airEstimate")}`
+      : `${t("airAvg")} · ${t("airStation", r.station || "-")}`;
     $("#air").replaceChildren(
       pick,
       el("div", { class: "air-now" },
-        el("span", { class: "air-value" }, pm(r.avg24 ?? r.pm25), el("small", {}, " µg/m³")),
+        el("span", { class: "air-value" }, isModel(r) ? "≈" : "", pm(r.avg24 ?? r.pm25), el("small", {}, " µg/m³")),
         el("div", {},
           el("div", { class: "air-band" }, level !== null ? el("span", { class: `pm-dot pm${level}`, "aria-hidden": "true" }) : null, level !== null ? PM_BANDS[level][L] : ""),
-          el("div", { class: "meta" }, `${t("airAvg")} · ${t("airNow", pm(r.pm25))}`))),
+          el("div", { class: "meta" }, detail))),
       r.trend.length > 1 ? sparkline(r.trend, { zero: true, limit: 37.5, label: hourLabel, format: (v) => `${pm(v)} µg/m³` }) : null,
       el("ul", { class: "air-list" }, ...others.map((p) => {
         const lv = bandOf(p.avg24);
         return el("li", { title: lv !== null ? PM_BANDS[lv][L] : "" },
-          el("span", { class: `pm-dot pm${lv ?? "x"}`, "aria-hidden": "true" }), el("span", {}, p.name[L]), el("b", {}, pm(p.avg24)));
+          el("span", { class: `pm-dot pm${lv ?? "x"}`, "aria-hidden": "true" }), el("span", {}, p.name[L]), el("b", {}, isModel(p) ? "≈" : "", pm(p.avg24)));
       })),
       el("p", { class: "src" }, t("airSrc", fmtTime(air.time))),
+      air.readings.some(isModel) ? el("p", { class: "src" }, t("airModel")) : null,
     );
     box.hidden = false;
   }

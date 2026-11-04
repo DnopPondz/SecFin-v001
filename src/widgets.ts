@@ -2,10 +2,16 @@ import { PROVINCES } from "./settings";
 import { thaiDate } from "./time";
 
 // Side panels refreshed by the hourly cron and served from one KV key: PM2.5 for the northern
-// provinces and a few market numbers. No AI. Four external requests an hour, six when oil is due.
+// provinces and a few market numbers. No AI. About 18 external requests an hour (13 of them
+// OpenAQ), a few more when oil, fuel or the OpenAQ sensor list is due.
 //
-// PM2.5: Open-Meteo Air Quality (CAMS model estimates, about 40 km grid; free for non-commercial
-//   use with attribution). Air4Thai station data would be better but its TLS chain fails from Workers.
+// PM2.5: Pollution Control Department stations (Air4Thai) through OpenAQ v3, one station per
+//   province, needs the free OPENAQ_API_KEY secret. Air4Thai's own API fails TLS from Workers (its
+//   server sends a Let's Encrypt certificate with a Sectigo chain, seen 2026-11-04). Air4Thai
+//   publishes the 24 h moving mean each hour, which is what the Thai bands are defined on.
+//   A province without a fresh station reading falls back to Open-Meteo (CAMS model estimates,
+//   about 40 km grid; free for non-commercial use with attribution), which read 2 to 4 times lower
+//   than the stations on 2026-11-04, so it is labelled as an estimate.
 // FX: Frankfurter (ECB reference rates, working days only). BTC: CoinGecko public API (no key).
 // Gold: gold-api.com real-time XAU (free, no key, commercial use allowed; history needs a key, so
 //   the chart is built from our own daily closes). The Thai baht-weight price is an estimate from
@@ -28,13 +34,17 @@ export interface Bilingual {
 export interface AirReading {
   id: string;
   name: Bilingual;
-  pm25: number | null; // latest hourly value, µg/m³
-  avg24: number | null; // mean of the last 24 hourly values; Thai bands are defined on the 24 h mean
-  trend: number[]; // last 24 hourly values, oldest first
+  source: "station" | "model";
+  station?: string; // station name, for station readings
+  time: string; // hour of the latest value, Thai local time "YYYY-MM-DDTHH:MM"
+  pm25: number | null; // latest hourly value, µg/m³; null for stations, which publish only the 24 h mean
+  avg24: number | null; // 24 h mean; Thai bands are defined on it
+  trend: number[]; // up to 24 hourly values, oldest first (24 h means for stations)
+  hours: string[]; // "HH:00" of each trend value; station series can skip hours
 }
 
 export interface Air {
-  time: string; // model hour, Thai local time
+  time: string; // newest reading hour, Thai local time
   readings: AirReading[];
 }
 
@@ -125,18 +135,181 @@ export function parseAir(raw: unknown): Air {
     const lastHour = hourly?.time?.at(-1) ?? "";
     if (typeof current?.pm2_5 === "number" && current.time && current.time > lastHour) values.push(current.pm2_5);
     const trend = values.slice(-24).map(round1);
+    const time = current?.time ?? lastHour;
     return {
       id: p.id,
       name: { th: p.th, en: p.en },
+      source: "model" as const,
+      time,
       pm25: typeof current?.pm2_5 === "number" ? round1(current.pm2_5) : (trend.at(-1) ?? null),
       avg24: trend.length >= 12 ? round1(trend.reduce((s, v) => s + v, 0) / trend.length) : null,
       trend,
+      hours: hoursBack(time, trend.length),
     };
   });
   return { time: points[0].current?.time ?? "", readings };
 }
 
-export async function fetchAir(): Promise<Air> {
+// "HH:00" labels for `n` consecutive hours ending at `time`.
+function hoursBack(time: string, n: number): string[] {
+  const end = Number(time.slice(11, 13)) || 0;
+  return Array.from({ length: n }, (_, i) => `${String((end - (n - 1 - i) + 48) % 24).padStart(2, "0")}:00`);
+}
+
+// OpenAQ location ids of the Air4Thai station used for each province (chosen 2026-11-04: the
+// provincial capital's station). Tak's only active Air4Thai station is in Mae Sot, which had sent
+// nothing since 2026-10-06, so Tak shows the model estimate until it returns.
+export const AIR_STATIONS: Record<string, number> = {
+  chiangmai: 225579, // 36t Yupparaj Wittayalai School
+  chiangrai: 2328, // 57t Natural Resources and Environment Office
+  lampang: 225570, // 37t Meteorological station
+  lamphun: 225655, // 68t Meteorological station
+  maehongson: 225648, // 58t Natural Resources and Environment Office
+  phayao: 225666, // 70t Phayao Provincial Hall
+  phrae: 225630, // 69t Meteorology Center
+  nan: 225674, // 67t Municipality Office
+  uttaradit: 228543, // 92t King Bhumibol 72nd Anniversary Park
+  tak: 225626, // 76t Non-Formal Education Centre, Mae Sot
+  sukhothai: 351927, // 96t Le Thai Community Park
+  phitsanulok: 225585, // 86t Chom Nan Chaloem Phrakiat Park
+  phetchabun: 270250, // 97t Phetbura garden
+};
+
+const OPENAQ = "https://api.openaq.org/v3";
+const AIR4THAI_PROVIDER = 118;
+const SENSORS_KEY = "openaq:sensors";
+const SENSORS_EVERY_MS = 24 * 60 * 60 * 1000;
+const STATION_STALE_MS = 3 * 60 * 60 * 1000;
+
+// Each station has had more than one PM2.5 sensor id over time (OpenAQ moved them in May 2026 and
+// back), so the candidates come from OpenAQ once a day and the one that last worked is tried first.
+interface SensorMap {
+  at: number;
+  sensors: Record<string, number[]>; // location id -> PM2.5 sensor ids
+  names: Record<string, string>; // location id -> station name
+  pick: Record<string, number>; // location id -> sensor that last had fresh data
+}
+
+export function parseSensorList(raw: { results?: { id: number; name?: string; sensors?: { id: number; parameter?: { id: number } }[] }[] }, now: number): SensorMap {
+  const map: SensorMap = { at: now, sensors: {}, names: {}, pick: {} };
+  for (const l of raw.results ?? []) {
+    const ids = (l.sensors ?? []).filter((s) => s.parameter?.id === 2).map((s) => s.id);
+    if (ids.length === 0) continue;
+    map.sensors[l.id] = ids;
+    map.names[l.id] = l.name ?? "";
+  }
+  return map;
+}
+
+async function loadSensorMap(env: Env, key: string, now: number): Promise<SensorMap> {
+  const cached = await env.CACHE.get<SensorMap>(SENSORS_KEY, "json");
+  if (cached && now - cached.at < SENSORS_EVERY_MS) return cached;
+  const url = new URL(`${OPENAQ}/locations`);
+  url.searchParams.set("bbox", "97.3,16.2,101.6,20.6");
+  url.searchParams.set("parameters_id", "2");
+  url.searchParams.set("providers_id", String(AIR4THAI_PROVIDER));
+  url.searchParams.set("monitor", "true");
+  url.searchParams.set("limit", "200");
+  try {
+    const res = await fetch(url, { headers: { ...UA, "X-API-Key": key }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`OpenAQ locations HTTP ${res.status}`);
+    const map = parseSensorList(await res.json(), now);
+    map.pick = cached?.pick ?? {};
+    await env.CACHE.put(SENSORS_KEY, JSON.stringify(map));
+    return map;
+  } catch (err) {
+    if (cached) return cached; // keep using yesterday's list
+    throw err;
+  }
+}
+
+export interface StationReading {
+  time: string;
+  trend: number[];
+  hours: string[];
+}
+
+interface OpenAqMeasurement {
+  value?: number | null;
+  period?: { datetimeTo?: { utc?: string; local?: string } };
+}
+
+// The last 24 hours of one sensor, or null when its newest value is older than 3 hours.
+// Air4Thai marks missing values as negative numbers.
+export function parseMeasurements(raw: { results?: OpenAqMeasurement[] }, now: number): StationReading | null {
+  const rows = (raw.results ?? [])
+    .filter((r) => typeof r.value === "number" && r.value >= 0 && r.period?.datetimeTo?.utc && r.period.datetimeTo.local)
+    .sort((a, b) => a.period!.datetimeTo!.utc!.localeCompare(b.period!.datetimeTo!.utc!));
+  const last = rows.at(-1);
+  if (!last || now - Date.parse(last.period!.datetimeTo!.utc!) > STATION_STALE_MS) return null;
+  const since = Date.parse(last.period!.datetimeTo!.utc!) - 24 * 60 * 60 * 1000;
+  const day = rows.filter((r) => Date.parse(r.period!.datetimeTo!.utc!) > since);
+  return {
+    time: last.period!.datetimeTo!.local!.slice(0, 16),
+    trend: day.map((r) => round1(r.value!)),
+    hours: day.map((r) => `${r.period!.datetimeTo!.local!.slice(11, 13)}:00`),
+  };
+}
+
+async function fetchSensor(id: number, key: string, now: number): Promise<StationReading | null> {
+  const url = new URL(`${OPENAQ}/sensors/${id}/measurements`);
+  url.searchParams.set("datetime_from", new Date(now - 25 * 60 * 60 * 1000).toISOString());
+  url.searchParams.set("limit", "30");
+  const res = await fetch(url, { headers: { ...UA, "X-API-Key": key }, signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`OpenAQ sensor ${id} HTTP ${res.status}`);
+  return parseMeasurements(await res.json(), now);
+}
+
+// Station readings by province id; provinces without a fresh reading are left out.
+async function fetchStations(env: Env, key: string, now: number): Promise<Record<string, StationReading & { station: string }>> {
+  const map = await loadSensorMap(env, key, now);
+  const out: Record<string, StationReading & { station: string }> = {};
+  let picked = false;
+  await Promise.all(Object.entries(AIR_STATIONS).map(async ([province, loc]) => {
+    const ids = map.sensors[loc] ?? [];
+    const order = [...ids].sort((a, b) => Number(b === map.pick[loc]) - Number(a === map.pick[loc]));
+    for (const id of order) {
+      try {
+        const reading = await fetchSensor(id, key, now);
+        if (!reading) continue;
+        out[province] = { ...reading, station: map.names[loc] ?? "" };
+        if (map.pick[loc] !== id) { map.pick[loc] = id; picked = true; }
+        return;
+      } catch (err) {
+        console.error("air station:", province, err);
+      }
+    }
+  }));
+  if (picked) await env.CACHE.put(SENSORS_KEY, JSON.stringify(map));
+  return out;
+}
+
+// Station reading where there is one, the model estimate otherwise.
+export function mergeAir(model: Air | null, stations: Record<string, StationReading & { station: string }>): Air {
+  const readings = PROVINCES.map((p): AirReading => {
+    const s = stations[p.id];
+    if (s) {
+      return { id: p.id, name: { th: p.th, en: p.en }, source: "station", station: s.station, time: s.time, pm25: null, avg24: s.trend.at(-1) ?? null, trend: s.trend, hours: s.hours };
+    }
+    return model?.readings.find((r) => r.id === p.id) ?? { id: p.id, name: { th: p.th, en: p.en }, source: "model", time: "", pm25: null, avg24: null, trend: [], hours: [] };
+  });
+  const time = readings.map((r) => r.time).filter(Boolean).sort().at(-1) ?? "";
+  return { time, readings };
+}
+
+export async function fetchAir(env: Env, now: number): Promise<Air> {
+  const [model, stations] = await Promise.allSettled([
+    fetchModelAir(),
+    env.OPENAQ_API_KEY ? fetchStations(env, env.OPENAQ_API_KEY, now) : Promise.resolve({}),
+  ]);
+  if (model.status === "rejected") console.error("air model:", model.reason);
+  if (stations.status === "rejected") console.error("air stations:", stations.reason);
+  const found = stations.status === "fulfilled" ? stations.value : {};
+  if (model.status === "rejected" && Object.keys(found).length === 0) throw model.reason;
+  return mergeAir(model.status === "fulfilled" ? model.value : null, found);
+}
+
+async function fetchModelAir(): Promise<Air> {
   const url = new URL("https://air-quality-api.open-meteo.com/v1/air-quality");
   url.searchParams.set("latitude", PROVINCES.map((p) => p.lat).join(","));
   url.searchParams.set("longitude", PROVINCES.map((p) => p.lon).join(","));
@@ -345,7 +518,7 @@ export async function refreshWidgets(env: Env, now = Date.now()): Promise<Widget
   const prev = await loadWidgets(env);
   const fuelDue = !prev?.fuel || !prev.fuelAt || now - prev.fuelAt >= FUEL_EVERY_MS;
   const [air, markets, fuel] = await Promise.allSettled([
-    fetchAir(),
+    fetchAir(env, now),
     fetchMarkets(now, prev?.markets, env.EIA_API_KEY),
     fuelDue ? fetchFuel() : Promise.reject(new Error("not due")),
   ]);
