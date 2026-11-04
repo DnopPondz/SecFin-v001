@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deviceOf, groupStats, isBot, issueSession, readCookie, rankStories, refHost, validView, verifySession } from "../src/adms";
+import { deviceOf, groupStats, isBot, issueSession, readCookie, rankStories, refHost, summariseTraffic, validView, verifySession, type TrafficRow } from "../src/adms";
 import type { Brief, BriefItem } from "../src/brief";
 
 const PIN = "1234567890";
@@ -66,4 +66,22 @@ test("rankStories combines reads, clicks and front-page impressions per edition"
   assert.equal(none[0].rate, 0); // no impressions: rate 0, not NaN
   const byCat = groupStats(stats, (s) => s.category);
   assert.deepEqual(byCat.find((g) => g.key === "cyber"), { key: "cyber", stories: 2, reads: 6, clicks: 3, impressions: 40, rate: 0.225 });
+});
+
+test("summariseTraffic folds one grouped query into totals and top lists", () => {
+  const row = (over: Partial<TrafficRow>): TrafficRow => ({
+    hour: "2026-11-04 01:00:00", page: "home", country: "TH", region: "Chiang Mai", city: "Chiang Mai", ref: "direct", device: "mobile", lang: "th", vid: "v1", n: 1, ...over,
+  });
+  const s = summariseTraffic([
+    row({ n: 3 }),
+    row({ page: "story", vid: "v2", n: 2 }),
+    row({ hour: "2026-11-04 00:00:00", country: "SG", region: "", city: "Singapore", device: "desktop", vid: "v3", ref: "google.com" }),
+  ], "x");
+  assert.equal(s.views, 6);
+  assert.equal(s.storyViews, 2);
+  assert.equal(s.visitors, 3);
+  assert.deepEqual(s.hourly.map((h) => h.hour), ["2026-11-04 00:00:00", "2026-11-04 01:00:00"]); // sorted
+  assert.deepEqual(s.countries, [{ country: "TH", views: 5 }, { country: "SG", views: 1 }]);
+  assert.deepEqual(s.cities[0], { country: "TH", region: "Chiang Mai", city: "Chiang Mai", views: 5 });
+  assert.equal(s.truncated, false);
 });

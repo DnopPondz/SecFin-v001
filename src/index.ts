@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import {
   CLEAR_COOKIE, SESSION_COOKIE, isBot, issueSession, pinConfigured, quotas, readCookie, recordView, sessionCookie,
-  storyReport, timingSafeEqualStr, traffic, validView, verifySession, type ViewBody,
+  cached, storyReport, timingSafeEqualStr, traffic, validView, verifySession, type ViewBody,
 } from "./adms";
 import { BudgetExceeded, neuronsUsed } from "./ai";
 import { ask } from "./ask";
@@ -313,17 +313,23 @@ const rangeDays = (v: string | undefined) => (v === "1" ? 1 : v === "30" ? 30 : 
 
 app.get("/api/adms/traffic", async (c) => {
   if (!(await admsSession(c))) return c.json({ ok: false }, 401);
-  return c.json(await traffic(c.env, rangeDays(c.req.query("days")), c.req.query("owner") === "1"), 200, { "Cache-Control": "no-store" });
+  const days = rangeDays(c.req.query("days"));
+  const owner = c.req.query("owner") === "1";
+  const data = await cached(c.env, `traffic:${days}:${owner ? 1 : 0}`, c.req.query("fresh") === "1", () => traffic(c.env, days, owner));
+  return c.json(data, 200, { "Cache-Control": "no-store" });
 });
 
 app.get("/api/adms/stories", async (c) => {
   if (!(await admsSession(c))) return c.json({ ok: false }, 401);
-  return c.json(await storyReport(c.env, rangeDays(c.req.query("days")), c.req.query("owner") === "1"), 200, { "Cache-Control": "no-store" });
+  const days = rangeDays(c.req.query("days"));
+  const owner = c.req.query("owner") === "1";
+  const data = await cached(c.env, `stories:${days}:${owner ? 1 : 0}`, c.req.query("fresh") === "1", () => storyReport(c.env, days, owner));
+  return c.json(data, 200, { "Cache-Control": "no-store" });
 });
 
 app.get("/api/adms/quotas", async (c) => {
   if (!(await admsSession(c))) return c.json({ ok: false }, 401);
-  return c.json(await quotas(c.env), 200, { "Cache-Control": "no-store" });
+  return c.json(await cached(c.env, "quotas", c.req.query("fresh") === "1", () => quotas(c.env)), 200, { "Cache-Control": "no-store" });
 });
 
 async function startBrief(env: Env, now: number): Promise<string> {

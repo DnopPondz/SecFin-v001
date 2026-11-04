@@ -137,9 +137,31 @@ export function recordView(env: Env, view: View, cf: CfGeo | undefined, ua: stri
 
 type Row = Record<string, unknown>;
 
+// The Analytics SQL API limits requests per account without publishing the numbers (2026-11-04:
+// 21 parallel queries all failed with "Rate limit exceeded"). Queries therefore run one at a time,
+// and a rate-limited one waits a moment and tries once more.
 async function sql<T extends Row>(env: Env, query: string, params: Record<string, string | number>): Promise<T[]> {
-  const res = await env.ANALYTICS_SQL.query<T>({ query, params });
-  return res.data ?? [];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await env.ANALYTICS_SQL.query<T>({ query, params });
+      return res.data ?? [];
+    } catch (err) {
+      if (attempt >= 1 || !/rate limit|too many/i.test(String(err))) throw err;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+}
+
+// Dashboard results are kept 5 minutes in KV (1 minute when something failed, so a retry comes
+// soon), which keeps repeated visits and range switches off the SQL API. "fresh" skips the cache.
+export async function cached<T extends { errors: string[] }>(env: Env, key: string, fresh: boolean, fn: () => Promise<T>): Promise<T & { cachedAt: number }> {
+  if (!fresh) {
+    const hit = await env.CACHE.get<T & { cachedAt: number }>(`adms:${key}`, "json");
+    if (hit) return hit;
+  }
+  const value = { ...(await fn()), cachedAt: Date.now() };
+  await env.CACHE.put(`adms:${key}`, JSON.stringify(value), { expirationTtl: value.errors.length ? 60 : 300 });
+  return value;
 }
 
 // One failing dataset (beta API, missing permission) must not blank the whole dashboard.
@@ -167,38 +189,85 @@ export interface Traffic {
   referrers: { ref: string; views: number }[];
   devices: { device: string; views: number }[];
   langs: { lang: string; views: number }[];
+  truncated: boolean; // the grouped rows hit TRAFFIC_ROWS, so totals are a lower bound
   errors: string[];
+}
+
+export interface TrafficRow {
+  hour: string;
+  page: string;
+  country: string;
+  region: string;
+  city: string;
+  ref: string;
+  device: string;
+  lang: string;
+  vid: string;
+  n: number;
+}
+
+const TRAFFIC_ROWS = 5000;
+
+function top<K extends string>(counts: Map<string, number>, key: K, limit: number): ({ [P in K]: string } & { views: number })[] {
+  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([k, views]) => ({ [key]: k, views }) as { [P in K]: string } & { views: number });
+}
+
+// One grouped query, summarised here: the SQL API rate-limits per account, so one query with
+// several dimensions beats seven small ones. Visitors are distinct daily ids, so a person who
+// comes back on another day counts again.
+export function summariseTraffic(rows: TrafficRow[], since: string): Omit<Traffic, "errors"> {
+  const add = (m: Map<string, number>, k: string, n: number) => m.set(k, (m.get(k) ?? 0) + n);
+  const hourly = new Map<string, number>();
+  const countries = new Map<string, number>();
+  const cities = new Map<string, number>();
+  const refs = new Map<string, number>();
+  const devices = new Map<string, number>();
+  const langs = new Map<string, number>();
+  const visitors = new Set<string>();
+  let views = 0;
+  let storyViews = 0;
+  for (const r of rows) {
+    views += r.n;
+    if (r.page === "story") storyViews += r.n;
+    if (r.vid) visitors.add(r.vid);
+    add(hourly, r.hour, r.n);
+    add(countries, r.country, r.n);
+    add(cities, JSON.stringify([r.country, r.region, r.city]), r.n);
+    add(refs, r.ref, r.n);
+    add(devices, r.device, r.n);
+    add(langs, r.lang, r.n);
+  }
+  return {
+    since,
+    views,
+    visitors: visitors.size,
+    storyViews,
+    hourly: [...hourly].sort((a, b) => a[0].localeCompare(b[0])).map(([hour, v]) => ({ hour, views: v })),
+    countries: top(countries, "country", 20),
+    cities: top(cities, "key", 20).map(({ key, views: v }) => {
+      const [country, region, city] = JSON.parse(key) as string[];
+      return { country, region, city, views: v };
+    }),
+    referrers: top(refs, "ref", 15),
+    devices: top(devices, "device", 5),
+    langs: top(langs, "lang", 5),
+    truncated: rows.length >= TRAFFIC_ROWS,
+  };
 }
 
 export async function traffic(env: Env, days: number, includeOwner: boolean, now = Date.now()): Promise<Traffic> {
   const since = new Date(now - days * 86_400_000).toISOString();
   const owner = includeOwner ? "" : " AND blob11 != '1'";
-  const where = `timestamp >= $since${owner}`;
   const errors: string[] = [];
-  const p = { since };
-  const [totals, hourly, countries, cities, referrers, devices, langs] = await Promise.all([
-    safe("totals", () => sql<Row>(env, `SELECT COUNT(*) AS views, COUNT(DISTINCT blob10) AS visitors, countIf(blob1 = 'story') AS stories FROM ${VIEWS} WHERE ${where}`, p), errors),
-    safe("hourly", () => sql<Row>(env, `SELECT toStartOfHour(timestamp) AS hour, COUNT(*) AS views FROM ${VIEWS} WHERE ${where} GROUP BY hour ORDER BY hour`, p), errors),
-    safe("countries", () => sql<Row>(env, `SELECT blob4 AS country, COUNT(*) AS views FROM ${VIEWS} WHERE ${where} GROUP BY country ORDER BY views DESC LIMIT 20`, p), errors),
-    safe("cities", () => sql<Row>(env, `SELECT blob4 AS country, blob5 AS region, blob6 AS city, COUNT(*) AS views FROM ${VIEWS} WHERE ${where} GROUP BY country, region, city ORDER BY views DESC LIMIT 20`, p), errors),
-    safe("referrers", () => sql<Row>(env, `SELECT blob7 AS ref, COUNT(*) AS views FROM ${VIEWS} WHERE ${where} GROUP BY ref ORDER BY views DESC LIMIT 15`, p), errors),
-    safe("devices", () => sql<Row>(env, `SELECT blob8 AS device, COUNT(*) AS views FROM ${VIEWS} WHERE ${where} GROUP BY device ORDER BY views DESC LIMIT 5`, p), errors),
-    safe("langs", () => sql<Row>(env, `SELECT blob9 AS lang, COUNT(*) AS views FROM ${VIEWS} WHERE ${where} GROUP BY lang ORDER BY views DESC LIMIT 5`, p), errors),
-  ]);
-  const t = totals?.[0] ?? {};
-  return {
-    since,
-    views: num(t.views),
-    visitors: num(t.visitors),
-    storyViews: num(t.stories),
-    hourly: (hourly ?? []).map((r) => ({ hour: String(r.hour), views: num(r.views) })),
-    countries: (countries ?? []).map((r) => ({ country: String(r.country), views: num(r.views) })),
-    cities: (cities ?? []).map((r) => ({ country: String(r.country), region: String(r.region), city: String(r.city), views: num(r.views) })),
-    referrers: (referrers ?? []).map((r) => ({ ref: String(r.ref), views: num(r.views) })),
-    devices: (devices ?? []).map((r) => ({ device: String(r.device), views: num(r.views) })),
-    langs: (langs ?? []).map((r) => ({ lang: String(r.lang), views: num(r.views) })),
-    errors,
-  };
+  const rows = await safe("visits", () => sql<Row>(env,
+    `SELECT toStartOfHour(timestamp) AS hour, blob1 AS page, blob4 AS country, blob5 AS region, blob6 AS city, blob7 AS ref, blob8 AS device, blob9 AS lang, blob10 AS vid, COUNT(*) AS n
+     FROM ${VIEWS} WHERE timestamp >= $since${owner}
+     GROUP BY hour, page, country, region, city, ref, device, lang, vid ORDER BY hour LIMIT ${TRAFFIC_ROWS}`, { since }), errors);
+  const typed: TrafficRow[] = (rows ?? []).map((r) => ({
+    hour: String(r.hour), page: String(r.page), country: String(r.country), region: String(r.region), city: String(r.city),
+    ref: String(r.ref), device: String(r.device), lang: String(r.lang), vid: String(r.vid), n: num(r.n),
+  }));
+  return { ...summariseTraffic(typed, since), errors };
 }
 
 // Story engagement ----------------------------------------------------------------------------
@@ -286,13 +355,16 @@ export async function storyReport(env: Env, days: number, includeOwner: boolean,
   const errors: string[] = [];
   const { results } = await env.DB.prepare("SELECT date, body FROM briefs WHERE date >= ? ORDER BY date DESC").bind(thaiDate(now - span * 86_400_000)).all<BriefRow>();
   const briefs = results.map((r) => JSON.parse(r.body) as Brief);
-  const [readRows, clickRows, impRows] = await Promise.all([
-    safe("reads", () => sql<Row>(env, `SELECT blob2 AS id, COUNT(*) AS n FROM ${VIEWS} WHERE timestamp >= $since AND blob1 = 'story'${owner} GROUP BY id ORDER BY n DESC LIMIT 500`, { since }), errors),
-    safe("clicks", () => sql<Row>(env, `SELECT blob3 AS url, COUNT(*) AS n FROM ${CLICKS} WHERE timestamp >= $since GROUP BY url ORDER BY n DESC LIMIT 500`, { since }), errors),
-    safe("impressions", () => sql<Row>(env, `SELECT blob3 AS edition, COUNT(*) AS n FROM ${VIEWS} WHERE timestamp >= $since AND blob1 = 'home'${owner} GROUP BY edition ORDER BY n DESC LIMIT 100`, { since }), errors),
-  ]);
-  const reads = new Map((readRows ?? []).map((r) => [String(r.id), num(r.n)]));
-  const impressions = new Map((impRows ?? []).map((r) => [String(r.edition), num(r.n)]));
+  // Story reads and front-page impressions come from one grouped query; clicks from a second.
+  const viewRows = await safe("story views", () => sql<Row>(env, `SELECT blob1 AS page, blob2 AS id, blob3 AS edition, COUNT(*) AS n FROM ${VIEWS} WHERE timestamp >= $since${owner} GROUP BY page, id, edition ORDER BY n DESC LIMIT 2000`, { since }), errors);
+  const clickRows = await safe("clicks", () => sql<Row>(env, `SELECT blob3 AS url, COUNT(*) AS n FROM ${CLICKS} WHERE timestamp >= $since GROUP BY url ORDER BY n DESC LIMIT 500`, { since }), errors);
+  const reads = new Map<string, number>();
+  const impressions = new Map<string, number>();
+  for (const r of viewRows ?? []) {
+    const target = r.page === "story" ? reads : impressions;
+    const key = String(r.page === "story" ? r.id : r.edition);
+    target.set(key, (target.get(key) ?? 0) + num(r.n));
+  }
   // Click rows carry the publisher URL; story ids are SHA-256 of it.
   const clicksById = new Map<string, number>();
   for (const r of clickRows ?? []) clicksById.set(await sha256(String(r.url)), num(r.n));
@@ -331,22 +403,21 @@ export async function quotas(env: Env, now = Date.now()): Promise<{ quotas: Quot
   const today = new Date(now).toISOString().slice(0, 10) + "T00:00:00Z";
   const month = new Date(now).toISOString().slice(0, 7) + "-01T00:00:00Z";
   const day1 = new Date(now - 86_400_000).toISOString();
+  // One dataset per statement is an SQL API rule, so these are separate queries, run in sequence.
   const one = async <T extends Row>(label: string, query: string, params: Record<string, string>) =>
     (await safe(label, () => sql<T>(env, query, params), errors))?.[0] ?? null;
-  const [requests, logs, ai, d1, kv, queues, workflows, vecQueries, d1Size, kvSize, vecSize, meter] = await Promise.all([
-    one("workers requests", "SELECT COUNT(*) AS n FROM logs.workersLogs WHERE timestamp >= $today AND logType = 'invocation'", { today }),
-    one("workers logs", "SELECT COUNT(*) AS n FROM logs.workersLogs WHERE timestamp >= $today", { today }),
-    one("workers ai", "SELECT SUM(neurons) AS n FROM events.aiInference WHERE timestamp >= $today", { today }),
-    one("d1 rows", "SELECT SUM(rowsRead) AS r, SUM(rowsWritten) AS w FROM events.d1Queries WHERE timestamp >= $today", { today }),
-    one("kv ops", "SELECT countIf(actionType = 'read') AS r, countIf(actionType = 'write') AS w, countIf(actionType = 'delete') AS d, countIf(actionType = 'list') AS l FROM events.kvRequests WHERE timestamp >= $today", { today }),
-    one("queues", "SELECT SUM(numBillableOperations) AS n FROM events.queuesMessages WHERE timestamp >= $today", { today }),
-    one("workflows", "SELECT SUM(stepCountDiff) AS n FROM events.workflows WHERE timestamp >= $today", { today }),
-    one("vectorize queries", "SELECT countIf(operation = 'vectorQuery') AS n FROM events.vectorizeOperations WHERE timestamp >= $month", { month }),
-    one("d1 storage", "SELECT MAX(databaseSizeBytes) AS n FROM states.d1Storage WHERE timestamp >= $day1", { day1 }),
-    one("kv storage", "SELECT MAX(storedBytes) AS n FROM states.kvStorage WHERE timestamp >= $day1", { day1 }),
-    one("vectorize storage", "SELECT MAX(vectorCount) AS n FROM states.vectorizeStorage WHERE timestamp >= $day1", { day1 }),
-    safe("neuron meter", () => neuronsUsed(env, now), errors),
-  ]);
+  const requests = await one("workers requests", "SELECT COUNT(*) AS n FROM logs.workersLogs WHERE timestamp >= $today AND logType = 'invocation'", { today });
+  const logs = await one("workers logs", "SELECT COUNT(*) AS n FROM logs.workersLogs WHERE timestamp >= $today", { today });
+  const ai = await one("workers ai", "SELECT SUM(neurons) AS n FROM events.aiInference WHERE timestamp >= $today", { today });
+  const d1 = await one("d1 rows", "SELECT SUM(rowsRead) AS r, SUM(rowsWritten) AS w FROM events.d1Queries WHERE timestamp >= $today", { today });
+  const kv = await one("kv ops", "SELECT countIf(actionType = 'read') AS r, countIf(actionType = 'write') AS w, countIf(actionType = 'delete') AS d, countIf(actionType = 'list') AS l FROM events.kvRequests WHERE timestamp >= $today", { today });
+  const queues = await one("queues", "SELECT SUM(numBillableOperations) AS n FROM events.queuesMessages WHERE timestamp >= $today", { today });
+  const workflows = await one("workflows", "SELECT SUM(stepCountDiff) AS n FROM events.workflows WHERE timestamp >= $today", { today });
+  const vecQueries = await one("vectorize queries", "SELECT countIf(operation = 'vectorQuery') AS n FROM events.vectorizeOperations WHERE timestamp >= $month", { month });
+  const d1Size = await one("d1 storage", "SELECT MAX(databaseSizeBytes) AS n FROM states.d1Storage WHERE timestamp >= $day1", { day1 });
+  const kvSize = await one("kv storage", "SELECT MAX(storedBytes) AS n FROM states.kvStorage WHERE timestamp >= $day1", { day1 });
+  const vecSize = await one("vectorize storage", "SELECT MAX(vectorCount) AS n FROM states.vectorizeStorage WHERE timestamp >= $day1", { day1 });
+  const meter = await safe("neuron meter", () => neuronsUsed(env, now), errors);
   const v = (row: Row | null, key = "n") => (row ? num(row[key]) : null);
   const vec = v(vecSize);
   const vq = v(vecQueries);

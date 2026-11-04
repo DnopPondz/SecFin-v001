@@ -34,6 +34,8 @@
     q_vectorizeStored: "Vectorize stored dimensions",
     rl_api: "ทุก request ของ Worker", rl_search: "ค้นข่าว", rl_ask: "ถามข่าว (chatbot)", rl_login: "ใส่ PIN ADMS",
     perMin: (n) => `${n} ครั้ง/นาที`,
+    updated: (d) => `ข้อมูลเมื่อ ${d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })} น. (เก็บไว้ 5 นาที)`,
+    truncated: "ข้อมูลเยอะเกินเพดานการดึง ตัวเลขนี้เป็นค่าขั้นต่ำ",
   });
   Object.assign(window.SF.TEXT.en, {
     loginTitle: "Sign in to ADMS", pinLabel: "10-digit PIN", loginBtn: "Sign in",
@@ -66,6 +68,8 @@
     q_vectorizeStored: "Vectorize stored dimensions",
     rl_api: "Every Worker request", rl_search: "Search", rl_ask: "Ask (chatbot)", rl_login: "ADMS PIN entry",
     perMin: (n) => `${n} per minute`,
+    updated: (d) => `Data from ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })} (cached 5 minutes)`,
+    truncated: "Too many rows to fetch; these totals are a lower bound",
   });
 
   const $ = (s) => document.querySelector(s);
@@ -145,7 +149,7 @@
       bars(tr.langs.map((l) => ({ label: l.lang === "en" ? t("langEn") : t("langTh"), value: l.views })), tr.views),
     );
 
-    const ins = [];
+    const ins = tr.truncated ? [t("truncated")] : [];
     const peak = [...byHour].sort((a, b) => b.value - a.value)[0];
     if (peak?.value) ins.push(t("insPeak", `${peak.label}:00`, fmt(peak.value)));
     if (tr.countries[0]) ins.push(t("insCountry", regionName(tr.countries[0].country), pct(tr.countries[0].views, tr.views)));
@@ -241,17 +245,30 @@
     return res.json();
   }
 
-  async function loadAll() {
+  // One section at a time: the server queries Cloudflare's SQL API in sequence too, which has a
+  // per-account rate limit. Results are cached for 5 minutes; Refresh asks for fresh data.
+  let loading = false;
+  async function loadAll(fresh = false) {
+    if (loading) return;
+    loading = true;
     document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.days) === days)));
     $("#owner").checked = owner;
+    $("#refresh").disabled = true;
     for (const id of ["#kpis", "#top", "#quota-list"]) $(id).replaceChildren(el("p", { class: "empty" }, t("loading")));
-    const q = `days=${days}&owner=${owner ? 1 : 0}`;
+    const q = `days=${days}&owner=${owner ? 1 : 0}${fresh ? "&fresh=1" : ""}`;
     try {
-      const [traffic, stories, quotas] = await Promise.all([get(`/api/adms/traffic?${q}`), get(`/api/adms/stories?${q}`), get("/api/adms/quotas")]);
-      data = { traffic, stories, quotas };
-      renderAll();
+      data.traffic = await get(`/api/adms/traffic?${q}`);
+      renderTraffic();
+      data.stories = await get(`/api/adms/stories?${q}`);
+      renderStories();
+      data.quotas = await get(`/api/adms/quotas${fresh ? "?fresh=1" : ""}`);
+      renderQuotas();
+      $("#updated").textContent = t("updated", new Date(Math.min(...[data.traffic, data.stories, data.quotas].map((d) => d.cachedAt || Date.now()))));
     } catch (e) {
       if (e.signedOut) showLogin();
+    } finally {
+      loading = false;
+      $("#refresh").disabled = false;
     }
   }
 
@@ -284,7 +301,7 @@
     loadAll();
   }));
   $("#owner").addEventListener("change", (e) => { owner = e.target.checked; store.set("admsOwner", owner ? "1" : ""); loadAll(); });
-  $("#refresh").addEventListener("click", loadAll);
+  $("#refresh").addEventListener("click", () => loadAll(true));
   $("#logout").addEventListener("click", async () => { await fetch("/api/adms/logout", { method: "POST" }); showLogin(); });
 
   SF.initControls();

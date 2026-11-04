@@ -500,6 +500,7 @@ a.media:hover img { transform: scale(1.02); }
 .adms-nav { display: flex; gap: 4px; margin-left: auto; }
 .adms-nav a { text-decoration: none; padding: 4px 10px; border-radius: 6px; font-size: 0.88rem; font-weight: 500; }
 .adms-nav a:hover { background: var(--chip); }
+.adms-updated { color: var(--muted); font-size: 0.78rem; }
 .adms-section { padding-top: 28px; scroll-margin-top: 64px; display: grid; gap: 16px; }
 .adms-section h2 { margin: 0; font: 700 1.4rem var(--serif); border-top: 2px solid var(--text); padding-top: 8px; }
 .adms-note { margin: 0; color: var(--muted); font-size: 0.85rem; }
