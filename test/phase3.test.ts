@@ -58,3 +58,17 @@ test("weekly HTML escapes story text", () => {
   assert.ok(html.includes("https://e.com/?a=1&amp;b=2"));
   assert.ok(!html.includes("<script>x"));
 });
+
+test("salvageJson closes a reply that ran into whitespace, never one cut mid-value", async () => {
+  const { salvageJson } = await import("../src/ai");
+  assert.deepEqual(salvageJson('{\n "answer": "ok [1]"\n\n\n   \n'), { answer: "ok [1]" });
+  assert.deepEqual(salvageJson('{"items": [{"i": 0}\n\n\n'), { items: [{ i: 0 }] });
+  assert.equal(salvageJson('{"answer": "cut in the mid'), undefined);
+  assert.equal(salvageJson('{"answer": "ends with an escaped quote \\"'), undefined);
+  assert.equal(salvageJson(42), undefined);
+});
+
+test("mergeAnswer falls back to inline citations when cited is missing", () => {
+  const out = mergeAnswer([hit(1), hit(2), hit(3)], { answer: "First [1], then [2, 3] and [9]." });
+  assert.deepEqual(out.sources.map((s) => s.n), [1, 2, 3]);
+});

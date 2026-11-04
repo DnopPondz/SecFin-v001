@@ -82,9 +82,16 @@ export async function runJson(env: Env, messages: ChatMessage[], schema: object,
       : worstCaseNeurons(messages, maxTokens);
   await addNeurons(env, neurons, now);
 
-  // A reply cut off at max_tokens is unparseable JSON; say so instead of reporting a syntax error.
-  if (out.choices?.[0]?.finish_reason === "length") throw new TruncatedOutput(`reply hit max_tokens (${maxTokens})`);
   const content = out.choices?.[0]?.message?.content ?? out.response;
+  // Gemma in JSON mode sometimes finishes the last value and then emits blank lines until
+  // max_tokens (seen 2026-11-04 on a chat answer). If the cut fell in that whitespace the reply is
+  // complete and only needs closing; a reply cut inside a value is still an error.
+  if (out.choices?.[0]?.finish_reason === "length") {
+    const salvaged = salvageJson(content);
+    if (salvaged === undefined) throw new TruncatedOutput(`reply hit max_tokens (${maxTokens})`);
+    console.warn(`runJson: closed a reply that ran into whitespace at max_tokens (${maxTokens})`);
+    return { data: salvaged, neurons };
+  }
   let data: unknown;
   try {
     data = typeof content === "string" ? JSON.parse(stripFence(content)) : content;
@@ -93,6 +100,22 @@ export async function runJson(env: Env, messages: ChatMessage[], schema: object,
     throw new Error(`${err instanceof Error ? err.message : err}; finish_reason=${out.choices?.[0]?.finish_reason}, completion_tokens=${usage.completion_tokens}, starts: ${String(content).slice(0, 160)}`);
   }
   return { data, neurons };
+}
+
+// Close a JSON reply that ended in whitespace after a complete value. Only a cut right after a
+// closing quote, bracket or brace qualifies, so a value cut mid-text is never passed off as whole.
+export function salvageJson(content: unknown): unknown | undefined {
+  if (typeof content !== "string") return undefined;
+  const trimmed = stripFence(content).trimEnd();
+  if (!/(?:[^\\]"|[\]}])$/.test(trimmed)) return undefined;
+  for (const tail of ["", "}", "]}", "}]}"]) {
+    try {
+      return JSON.parse(trimmed + tail);
+    } catch {
+      // try the next closing
+    }
+  }
+  return undefined;
 }
 
 function stripFence(s: string): string {

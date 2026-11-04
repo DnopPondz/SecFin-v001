@@ -5,9 +5,9 @@ import { search, type SearchHit } from "./search";
 // Retrieval-augmented answers over the 14-day archive. One question costs about 35 Neurons
 // (8 snippets in, a short answer out), and it can never eat into the brief's reserve.
 const TOP_K = 8;
-// 700 was too few on 2026-11-04: a Thai answer listing several Fortinet PSIRT advisories was cut
-// off. Only the tokens actually generated are billed, so the headroom costs nothing on short answers.
-const MAX_TOKENS = 1200;
+// A long Thai answer is about 400 tokens. Raising this does not help the JSON-mode whitespace loop
+// (see salvageJson in ai.ts); it only makes a looping reply cost more.
+const MAX_TOKENS = 1000;
 
 export interface AskSource {
   n: number;
@@ -22,7 +22,13 @@ export interface AskResult {
   sources: AskSource[];
 }
 
-const OutputSchema = z.object({ answer: z.string().min(1), cited: z.array(z.number().int()) });
+// "cited" can be missing when a looping reply was closed early (salvageJson); the inline [n]
+// markers in the answer say the same thing.
+const OutputSchema = z.object({ answer: z.string().min(1), cited: z.array(z.number().int()).optional() });
+
+export function inlineCitations(answer: string): number[] {
+  return [...answer.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)].flatMap((m) => m[1].split(",").map((n) => Number(n.trim())));
+}
 
 const JSON_SCHEMA = {
   type: "object",
@@ -84,7 +90,8 @@ export function buildAskMessages(question: string, hits: SearchHit[], history: T
 // Only items the model says it cited are returned, and only if they exist, so sources are always real.
 export function mergeAnswer(hits: SearchHit[], raw: unknown): AskResult {
   const parsed = OutputSchema.parse(raw);
-  const cited = [...new Set(parsed.cited)].filter((n) => n >= 1 && n <= hits.length).sort((a, b) => a - b);
+  const claimed = parsed.cited?.length ? parsed.cited : inlineCitations(parsed.answer);
+  const cited = [...new Set(claimed)].filter((n) => n >= 1 && n <= hits.length).sort((a, b) => a - b);
   return {
     // The model sometimes repeats its citation list at the end ("(cited: [1], [2])"); the page lists sources already.
     answer: parsed.answer.replace(/\s*\(?\s*cited\s*:[^)]*\)?\s*$/i, "").trim(),
