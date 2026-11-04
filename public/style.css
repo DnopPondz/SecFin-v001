@@ -247,7 +247,8 @@ a.media:hover img { transform: scale(1.02); }
 .mk-name { font-weight: 600; white-space: nowrap; }
 .mk-name small, .mk-val small { color: var(--muted); font-weight: 400; font-size: 0.75rem; }
 .mk-val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.markets li.mk-group { display: block; margin-top: 6px; color: var(--muted); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.markets li.mk-group, .mk-heading { display: block; margin-top: 6px; color: var(--muted); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.rail-box .mk-heading { margin: 14px 0 8px; color: var(--muted); font-size: 0.72rem; }
 .markets li.mk-group:first-child { margin-top: 0; }
 .markets li.mk-note { display: block; margin-top: -4px; color: var(--muted); font-size: 0.75rem; line-height: 1.45; }
 .rail-box .src .src-line { display: block; }

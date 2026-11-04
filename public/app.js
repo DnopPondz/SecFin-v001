@@ -19,7 +19,7 @@
     gold: "ทองคำ", goldBaht: (v) => `≈ ทองแท่ง 96.5% บาทละ ${v} บาท (ประมาณจากราคาโลก ไม่ใช่ราคาสมาคมค้าทองคำ)`,
     srcFx: (d) => `ค่าเงิน: อัตราอ้างอิง ECB วันที่ ${d} (Frankfurter)`, srcGold: "ทองคำ: ราคา spot จาก gold-api.com",
     srcOil: (d) => `น้ำมันดิบ: ราคา spot ของ EIA วันที่ ${d} (ช้ากว่าตลาดประมาณ 1 สัปดาห์)`, srcBtc: "BTC: CoinGecko",
-    fuelTitle: "ราคาน้ำมันในไทย", fuelUnit: "บาท/ลิตร", fuelSame: "คงที่",
+    fuelTitle: "ราคาน้ำมัน", oilWorld: "ราคาน้ำมันโลก", oilThai: "ราคาน้ำมันในไทย", fuelUnit: "บาท/ลิตร", fuelSame: "คงที่",
     fuelSrc: (d) => `ราคาขายปลีก ปตท. ในกรุงเทพฯ มีผล ${d} น. ต่างจังหวัดอาจสูงกว่าเล็กน้อย · ที่มา: PTT OR`,
     fuelChange: "เทียบกับราคาก่อนปรับครั้งล่าสุด",
     watchTitle: "ตรงกับ watchlist", watchHint: "ข่าว 3 วันล่าสุดที่ตรงกับคำที่ตั้งไว้",
@@ -38,7 +38,7 @@
     gold: "Gold", goldBaht: (v) => `≈ ${v} THB per baht-weight of 96.5% bar gold (estimated from spot, not the Gold Traders Association price)`,
     srcFx: (d) => `FX: ECB reference rates of ${d} (Frankfurter)`, srcGold: "Gold: spot price from gold-api.com",
     srcOil: (d) => `Crude: EIA spot prices, ${d} (about a week behind the market)`, srcBtc: "BTC: CoinGecko",
-    fuelTitle: "Fuel prices in Thailand", fuelUnit: "THB/litre", fuelSame: "unchanged",
+    fuelTitle: "Oil prices", oilWorld: "World crude", oilThai: "Pump prices in Thailand", fuelUnit: "THB/litre", fuelSame: "unchanged",
     fuelSrc: (d) => `PTT pump prices in Bangkok, effective ${d}. Provinces may be slightly higher · Source: PTT OR`,
     fuelChange: "Versus the price before the latest change",
     watchTitle: "On your watchlist", watchHint: "Stories from the last 3 days matching your terms",
@@ -236,7 +236,7 @@
   function renderMarkets() {
     const m = widgets?.markets;
     const box = $("#markets-box");
-    if (!m || (!m.fx?.length && !m.btc && !m.gold && !m.oil?.length)) { box.hidden = true; return; }
+    if (!m || (!m.fx?.length && !m.btc && !m.gold)) { box.hidden = true; return; }
     const group = (label, rows) => (rows.length ? [el("li", { class: "mk-group" }, label), ...rows] : []);
     const fx = (m.fx || []).map((r) => marketRow(r.code === "JPY" ? "JPY (100)" : r.code, "/THB", r.series, r.thb, r.change, 3));
     const commodities = [];
@@ -244,12 +244,10 @@
       commodities.push(marketRow(t("gold"), "/oz", m.gold.series, m.gold.usd, m.gold.change, 2));
       if (m.gold.thbBaht) commodities.push(el("li", { class: "mk-note" }, t("goldBaht", num(m.gold.thbBaht, 0))));
     }
-    for (const o of m.oil || []) commodities.push(marketRow(o.code === "BRENT" ? "Brent" : "WTI", "/bbl", o.series, o.usd, o.change, 2));
     const crypto = m.btc ? [marketRow("BTC", "/USD", null, m.btc.usd, m.btc.change24h, 0, m.btc.change24h !== null ? `${Math.abs(m.btc.change24h).toFixed(2)}% ${t("btc24")}` : null)] : [];
     const src = [
       m.fx?.length ? t("srcFx", m.fx[0].date) : null,
       m.gold ? t("srcGold") : null,
-      m.oil?.length ? t("srcOil", m.oil[0].date) : null,
       m.btc ? t("srcBtc") : null,
     ].filter(Boolean);
     $("#markets").replaceChildren(
@@ -259,21 +257,33 @@
     box.hidden = false;
   }
 
-  // Thai pump prices: one row per grade, change since the last price move.
+  // Oil card: world crude (Brent, WTI) on top, then Thai pump prices with the change since the last price move.
   function renderFuel() {
     const f = widgets?.fuel;
+    const oil = widgets?.markets?.oil || [];
     const box = $("#fuel-box");
-    if (!f?.prices?.length) { box.hidden = true; return; }
+    if (!f?.prices?.length && !oil.length) { box.hidden = true; return; }
     const L = SF.lang;
-    const when = new Date(`${f.effective}:00+07:00`).toLocaleString(L === "th" ? "th-TH" : "en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
-    $("#fuel").replaceChildren(
-      el("ul", { class: "fuel" }, ...f.prices.map((p) => el("li", {},
-        el("span", { class: "fuel-name" }, p.name[L]),
-        el("span", { class: "fuel-val" }, p.price.toFixed(2), el("small", {}, ` ${t("fuelUnit")}`)),
-        el("span", { class: "fuel-chg", title: t("fuelChange") },
-          p.change === null ? "" : p.change === 0 ? t("fuelSame") : `${arrow(p.change)}${Math.abs(p.change).toFixed(2)}`)))),
-      el("p", { class: "src" }, t("fuelSrc", when)),
-    );
+    const parts = [];
+    const src = [];
+    if (oil.length) {
+      parts.push(el("ul", { class: "markets" }, el("li", { class: "mk-group" }, t("oilWorld")),
+        ...oil.map((o) => marketRow(o.code === "BRENT" ? "Brent" : "WTI", "/bbl", o.series, o.usd, o.change, 2))));
+      src.push(t("srcOil", oil[0].date));
+    }
+    if (f?.prices?.length) {
+      const when = new Date(`${f.effective}:00+07:00`).toLocaleString(L === "th" ? "th-TH" : "en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
+      parts.push(
+        el("p", { class: "mk-heading" }, t("oilThai")),
+        el("ul", { class: "fuel" }, ...f.prices.map((p) => el("li", {},
+          el("span", { class: "fuel-name" }, p.name[L]),
+          el("span", { class: "fuel-val" }, p.price.toFixed(2), el("small", {}, ` ${t("fuelUnit")}`)),
+          el("span", { class: "fuel-chg", title: t("fuelChange") },
+            p.change === null ? "" : p.change === 0 ? t("fuelSame") : `${arrow(p.change)}${Math.abs(p.change).toFixed(2)}`)))),
+      );
+      src.push(t("fuelSrc", when));
+    }
+    $("#fuel").replaceChildren(...parts, el("p", { class: "src" }, ...src.map((s) => el("span", { class: "src-line" }, s))));
     box.hidden = false;
   }
 
