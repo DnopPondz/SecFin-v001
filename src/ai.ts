@@ -85,7 +85,13 @@ export async function runJson(env: Env, messages: ChatMessage[], schema: object,
   // A reply cut off at max_tokens is unparseable JSON; say so instead of reporting a syntax error.
   if (out.choices?.[0]?.finish_reason === "length") throw new TruncatedOutput(`reply hit max_tokens (${maxTokens})`);
   const content = out.choices?.[0]?.message?.content ?? out.response;
-  const data = typeof content === "string" ? JSON.parse(stripFence(content)) : content;
+  let data: unknown;
+  try {
+    data = typeof content === "string" ? JSON.parse(stripFence(content)) : content;
+  } catch (err) {
+    // Enough context in the log to tell a cut-off reply from a malformed one.
+    throw new Error(`${err instanceof Error ? err.message : err}; finish_reason=${out.choices?.[0]?.finish_reason}, completion_tokens=${usage.completion_tokens}, starts: ${String(content).slice(0, 160)}`);
+  }
   return { data, neurons };
 }
 
