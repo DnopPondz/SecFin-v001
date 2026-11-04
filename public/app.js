@@ -133,6 +133,8 @@
       brief = null;
     }
     render();
+    // One front-page view per edition shown: the impressions /adms divides reads by.
+    if (brief) SF.trackView("home", "", brief.date);
     // Keep today's write-ups on the device for reading offline.
     if (brief && !edition) {
       SF.precache(Object.values(brief.sections || {}).flat().filter((it) => it.id).map((it) => `/api/story/${it.id}`));

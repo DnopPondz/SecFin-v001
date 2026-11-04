@@ -1,4 +1,8 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import {
+  CLEAR_COOKIE, SESSION_COOKIE, isBot, issueSession, pinConfigured, quotas, readCookie, recordView, sessionCookie,
+  storyReport, timingSafeEqualStr, traffic, validView, verifySession, type ViewBody,
+} from "./adms";
 import { BudgetExceeded, neuronsUsed } from "./ai";
 import { ask } from "./ask";
 import type { Brief } from "./brief";
@@ -159,6 +163,18 @@ app.post("/api/click", async (c) => {
   return c.body(null, 204);
 });
 
+// Page-view beacon for /adms. Bots are skipped; the owner's own visits are flagged, not dropped.
+app.post("/api/view", async (c) => {
+  const ua = c.req.header("user-agent");
+  if (isBot(ua)) return c.body(null, 204);
+  const view = validView((await c.req.json().catch(() => ({}))) as ViewBody, new URL(c.req.url).hostname);
+  if (view) {
+    const owner = await verifySession(readCookie(c.req.header("cookie"), SESSION_COOKIE), c.env.ADMS_PIN, Date.now());
+    recordView(c.env, view, c.req.raw.cf as { country?: string; city?: string; region?: string } | undefined, ua, owner);
+  }
+  return c.body(null, 204);
+});
+
 app.get("/api/popular", async (c) => {
   try {
     return c.json(await popular(c.env), 200, { "Cache-Control": "public, max-age=600" });
@@ -270,6 +286,44 @@ app.get("/api/admin/workflow/:id", async (c) => {
   if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
   const instance = await c.env.BRIEF_WORKFLOW.get(c.req.param("id"));
   return c.json(await instance.status());
+});
+
+// /adms: owner dashboard behind a 10-digit PIN (secret ADMS_PIN) and a signed HttpOnly cookie.
+async function admsSession(c: Context<{ Bindings: Env }>): Promise<boolean> {
+  return verifySession(readCookie(c.req.header("cookie"), SESSION_COOKIE), c.env.ADMS_PIN, Date.now());
+}
+
+app.post("/api/adms/login", async (c) => {
+  if (!pinConfigured(c.env)) return c.json({ ok: false, error: "pin-not-set" }, 503);
+  const { success } = await c.env.LOGIN_LIMITER.limit({ key: c.req.header("CF-Connecting-IP") ?? "unknown" });
+  if (!success) return c.json({ ok: false, error: "too-many" }, 429);
+  const { pin } = (await c.req.json().catch(() => ({}))) as { pin?: unknown };
+  if (typeof pin !== "string" || !/^\d{10}$/.test(pin) || !timingSafeEqualStr(pin, c.env.ADMS_PIN!)) {
+    return c.json({ ok: false, error: "wrong-pin" }, 401);
+  }
+  return c.json({ ok: true }, 200, { "Set-Cookie": sessionCookie(await issueSession(c.env.ADMS_PIN!, Date.now())), "Cache-Control": "no-store" });
+});
+
+app.post("/api/adms/logout", (c) => c.json({ ok: true }, 200, { "Set-Cookie": CLEAR_COOKIE }));
+
+app.get("/api/adms/session", async (c) =>
+  c.json({ ok: await admsSession(c), configured: pinConfigured(c.env) }, 200, { "Cache-Control": "no-store" }));
+
+const rangeDays = (v: string | undefined) => (v === "1" ? 1 : v === "30" ? 30 : 7);
+
+app.get("/api/adms/traffic", async (c) => {
+  if (!(await admsSession(c))) return c.json({ ok: false }, 401);
+  return c.json(await traffic(c.env, rangeDays(c.req.query("days")), c.req.query("owner") === "1"), 200, { "Cache-Control": "no-store" });
+});
+
+app.get("/api/adms/stories", async (c) => {
+  if (!(await admsSession(c))) return c.json({ ok: false }, 401);
+  return c.json(await storyReport(c.env, rangeDays(c.req.query("days")), c.req.query("owner") === "1"), 200, { "Cache-Control": "no-store" });
+});
+
+app.get("/api/adms/quotas", async (c) => {
+  if (!(await admsSession(c))) return c.json({ ok: false }, 401);
+  return c.json(await quotas(c.env), 200, { "Cache-Control": "no-store" });
 });
 
 async function startBrief(env: Env, now: number): Promise<string> {

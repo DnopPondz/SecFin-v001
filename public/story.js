@@ -125,6 +125,7 @@
     SF.setEdition(date);
     if (date) $(".back").href = `/?d=${date}`;
     render();
+    if (story) SF.trackView("story", id, date);
   }
 
   SF.initControls();

@@ -10,10 +10,15 @@ interface Env {
   BROWSER: BrowserQuickActions;
   // Optional until Analytics Engine is enabled on the account; clicks are dropped without it.
   CLICKS?: AnalyticsEngineDataset;
+  // Page views for /adms (dataset secfin_views).
+  VIEWS?: AnalyticsEngineDataset;
   ANALYTICS_SQL: AnalyticsSqlBinding;
   API_LIMITER: RateLimit;
   SEARCH_LIMITER: RateLimit;
   ASK_LIMITER: RateLimit;
+  LOGIN_LIMITER: RateLimit;
+  // 10-digit PIN for /adms (`wrangler secret put ADMS_PIN`). /adms login is disabled without it.
+  ADMS_PIN?: string;
   // Secret for /api/admin/* routes (`wrangler secret put ADMIN_KEY`).
   ADMIN_KEY?: string;
   // Turnstile secret for /api/ask; the matching public site key is in public/chat.js.

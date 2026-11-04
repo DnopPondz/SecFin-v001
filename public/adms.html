@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>ADMS · SecFin Brief</title>
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+  <script>try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Noto+Serif+Thai:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="wrap topbar">
+      <a class="brand" href="/" style="font-size:1.25rem">SecFin <span>Brief</span></a>
+      <span class="adms-tag">ADMS</span>
+      <div class="controls">
+        <button class="icon-btn" id="lang" type="button">EN</button>
+        <button class="icon-btn" id="theme" type="button"></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap adms">
+    <section class="adms-login" id="login" hidden>
+      <form class="rail-box" id="login-form">
+        <h1 data-t="loginTitle">เข้าสู่ระบบ ADMS</h1>
+        <label for="pin" data-t="pinLabel">PIN 10 หลัก</label>
+        <input id="pin" type="password" inputmode="numeric" pattern="\d{10}" minlength="10" maxlength="10" autocomplete="off" required>
+        <button class="btn" type="submit" data-t="loginBtn">เข้าสู่ระบบ</button>
+        <p class="status" id="login-status" role="alert"></p>
+      </form>
+    </section>
+
+    <div id="dash" hidden>
+      <div class="adms-toolbar">
+        <div class="seg" role="group" aria-label="range">
+          <button type="button" data-days="1">24h</button>
+          <button type="button" data-days="7" aria-pressed="true">7d</button>
+          <button type="button" data-days="30">30d</button>
+        </div>
+        <label class="check"><input type="checkbox" id="owner"> <span data-t="includeMe">รวมการเข้าชมของฉัน</span></label>
+        <nav class="adms-nav">
+          <a href="#visitors" data-t="navVisitors">ผู้เข้าชม</a>
+          <a href="#stories" data-t="navStories">ความสนใจต่อข่าว</a>
+          <a href="#quotas" data-t="navQuotas">โควตา</a>
+        </nav>
+        <button class="btn ghost" id="refresh" type="button" data-t="refresh">รีเฟรช</button>
+        <button class="btn ghost" id="logout" type="button" data-t="logout">ออกจากระบบ</button>
+      </div>
+
+      <section class="adms-section" id="visitors">
+        <h2 data-t="navVisitors">ผู้เข้าชม</h2>
+        <div class="kpis" id="kpis"></div>
+        <div class="insights" id="insights"></div>
+        <div class="adms-grid">
+          <div class="rail-box"><h3 data-t="byHour">ช่วงเวลาที่เข้าชม (เวลาไทย)</h3><div id="hours"></div></div>
+          <div class="rail-box"><h3 id="trend-title"></h3><div id="trend"></div></div>
+          <div class="rail-box"><h3 data-t="countries">ประเทศ</h3><div id="countries"></div></div>
+          <div class="rail-box"><h3 data-t="cities">เมือง</h3><div id="cities"></div></div>
+          <div class="rail-box"><h3 data-t="referrers">มาจากไหน</h3><div id="referrers"></div></div>
+          <div class="rail-box"><h3 data-t="devices">อุปกรณ์และภาษา</h3><div id="devices"></div></div>
+        </div>
+      </section>
+
+      <section class="adms-section" id="stories">
+        <h2 data-t="navStories">ความสนใจต่อข่าว</h2>
+        <p class="adms-note" data-t="rateHelp"></p>
+        <div class="insights" id="story-insights"></div>
+        <div class="rail-box"><h3 data-t="topStories">ข่าวที่คนสนใจมากสุด</h3><div id="top"></div></div>
+        <div class="rail-box"><h3 data-t="bottomStories">ข่าวที่คนอ่านน้อย</h3><div id="bottom"></div></div>
+        <div class="adms-grid">
+          <div class="rail-box"><h3 data-t="bySection">ตามหมวด</h3><div id="by-cat"></div></div>
+          <div class="rail-box"><h3 data-t="byPosition">ตามตำแหน่งในหมวด</h3><div id="by-pos"></div></div>
+        </div>
+      </section>
+
+      <section class="adms-section" id="quotas">
+        <h2 data-t="quotaTitle">โควตา Free plan</h2>
+        <p class="adms-note" data-t="quotaHelp"></p>
+        <div class="rail-box"><div id="quota-list"></div></div>
+        <div class="rail-box"><h3 data-t="rateLimits">Rate limit ต่อ IP</h3><div id="rate-limits"></div></div>
+        <details class="adms-errors" id="errors" hidden><summary data-t="errorsTitle">ข้อมูลที่ดึงไม่สำเร็จ</summary><ul id="error-list"></ul></details>
+      </section>
+    </div>
+  </main>
+
+  <script src="/common.js"></script>
+  <script src="/adms.js"></script>
+</body>
+</html>

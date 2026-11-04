@@ -182,6 +182,24 @@
     try { navigator.sendBeacon("/api/click", new Blob([body], { type: "application/json" })); } catch {}
   });
 
+  // Page-view beacon for the owner's /adms dashboard. The visitor id is random and replaced every
+  // Thai day, so visits cannot be linked across days. Do Not Track and Global Privacy Control are honoured.
+  function trackView(page, id, edition) {
+    if (navigator.doNotTrack === "1" || navigator.globalPrivacyControl) return;
+    const day = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+    let vid = null;
+    try {
+      const saved = JSON.parse(localStorage.getItem("vid") || "null");
+      vid = saved && saved.day === day ? saved.id : null;
+      if (!vid) {
+        vid = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 16);
+        localStorage.setItem("vid", JSON.stringify({ day, id: vid }));
+      }
+    } catch {}
+    const body = JSON.stringify({ page, id: id || "", edition: edition || "", ref: document.referrer, lang, vid: vid || "" });
+    try { navigator.sendBeacon("/api/view", new Blob([body], { type: "application/json" })); } catch {}
+  }
+
   // Installable app and offline reading (public/sw.js). Pages work the same without it.
   if ("serviceWorker" in navigator) {
     addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
@@ -193,7 +211,7 @@
   }
 
   window.SF = {
-    TEXT, t, el, link, media, kicker, meta, storyHref, timeAgo, store, initControls, startTicker, precache,
+    TEXT, t, el, link, media, kicker, meta, storyHref, timeAgo, store, initControls, startTicker, precache, trackView,
     get lang() { return lang; },
     onLang(fn) { listeners.push(fn); },
     setEdition(date) { edition = date || null; },
