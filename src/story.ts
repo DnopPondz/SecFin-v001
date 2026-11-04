@@ -182,7 +182,13 @@ export interface StoryJob {
 }
 
 export async function runStoryJob(env: Env, job: StoryJob): Promise<"done" | "skipped"> {
-  if (await hasStory(env, job.item.id)) return "skipped";
+  // A story picked again (it was in yesterday's brief too, or the brief was re-run) is not
+  // rewritten, but its image still has to reach the new brief, or that card shows a placeholder.
+  const existing = await storyImage(env, job.item.id);
+  if (existing !== undefined) {
+    if (existing && !job.item.image) await patchBriefImages(env, thaiDate(job.now), new Map([[job.item.id, existing]]));
+    return "skipped";
+  }
   const story = await buildStory(env, job.item, job.category, job.now);
   await saveStory(env, story);
   // Many feeds carry no image, so the page's og:image found here also goes onto the front page.
@@ -221,9 +227,11 @@ export async function backfillBriefImages(env: Env, date: string): Promise<numbe
   return patchBriefImages(env, date, new Map(results.map((r) => [r.id, r.image])));
 }
 
-// A story already written today (for example by an earlier run of the same brief) is not redone.
-export async function hasStory(env: Env, id: string): Promise<boolean> {
-  return (await env.DB.prepare("SELECT 1 AS x FROM stories WHERE id = ?").bind(id).first()) !== null;
+// A story already written (by an earlier brief) is not redone. Returns undefined when there is
+// no write-up yet, otherwise its image URL or null.
+export async function storyImage(env: Env, id: string): Promise<string | null | undefined> {
+  const row = await env.DB.prepare("SELECT json_extract(body, '$.image') AS image FROM stories WHERE id = ?").bind(id).first<{ image: string | null }>();
+  return row ? (row.image ?? null) : undefined;
 }
 
 export async function saveStory(env: Env, story: StoryDetail): Promise<void> {
