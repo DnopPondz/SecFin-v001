@@ -5,6 +5,7 @@ import { parseFeed } from "./feed";
 import { sha256 } from "./hash";
 import type { TickerItem } from "./live";
 import { admit } from "./select";
+import { loadSettings, watchMatcher } from "./settings";
 import { SOURCES, sourceById, type Source } from "./sources";
 
 // Only fresh stories go to the live ticker, not the backlog a feed returns on its first fetch.
@@ -66,6 +67,7 @@ export async function ingestOne(env: Env, source: Source, now = Date.now()): Pro
   let embedded = 0;
   let fresh: TickerItem[] = [];
   try {
+    const match = watchMatcher((await loadSettings(env)).watch);
     const res = await fetch(source.url, {
       headers: { "user-agent": "SecFinBrief/0.1 (personal news digest)", accept: "application/rss+xml, application/atom+xml, application/xml, text/xml" },
       signal: AbortSignal.timeout(15_000),
@@ -75,13 +77,13 @@ export async function ingestOne(env: Env, source: Source, now = Date.now()): Pro
     const items = parseFeed(await res.text(), ITEMS_PER_FEED).flatMap((it) => {
       const category = admit(source, it.title, it.summary);
       // Feeds without dates get the fetch time; a future date (bad feed clock) is clamped to now.
-      return category ? [{ ...it, category, published: Math.min(it.published || now, now) }] : [];
+      return category ? [{ ...it, category, published: Math.min(it.published || now, now), watch: match(`${it.title} ${it.summary}`).join(",") || null }] : [];
     });
     const stmts = await Promise.all(
       items.map(async (it) =>
         env.DB.prepare(
-          "INSERT OR IGNORE INTO articles (id, url, source, category, region, lang, title, snippet, published_at, fetched_at, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ).bind(await sha256(it.link), it.link, source.id, it.category, source.region, source.lang, it.title, it.summary, it.published, now, it.image),
+          "INSERT OR IGNORE INTO articles (id, url, source, category, region, lang, title, snippet, published_at, fetched_at, image, watch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ).bind(await sha256(it.link), it.link, source.id, it.category, source.region, source.lang, it.title, it.summary, it.published, now, it.image, it.watch),
       ),
     );
     if (stmts.length > 0) {
@@ -121,6 +123,5 @@ export async function pruneArticles(env: Env, now = Date.now()): Promise<number>
   if (results.length > 0) await env.VECTORS.deleteByIds(results.map((r) => r.id));
   const out = await env.DB.prepare("DELETE FROM articles WHERE fetched_at < ?").bind(cutoff).run();
   await env.DB.prepare("DELETE FROM cves WHERE checked_at < ?").bind(cutoff).run();
-  await env.DB.prepare("DELETE FROM stories WHERE created_at < ?").bind(cutoff).run();
-  return out.meta.changes ?? 0;
+  await env.DB.prepare("DELETE FROM stories WHERE created_at < ?").bind(cutoff).run();  return out.meta.changes ?? 0;
 }

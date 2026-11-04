@@ -7,7 +7,7 @@
       th: "ไทย", global: "ต่างประเทศ", north: "ภาคเหนือ", sources: (n) => `${n} แหล่งข่าว`,
       why: "ทำไมต้องสนใจ", raw: "หัวข้อต้นฉบับ (ยังไม่ได้สรุป)", live: "ล่าสุด", error: "โหลดข้อมูลไม่สำเร็จ",
       ago: (m) => (m < 60 ? `${Math.max(1, m)} นาทีที่แล้ว` : m < 1440 ? `${Math.floor(m / 60)} ชม. ที่แล้ว` : `${Math.floor(m / 1440)} วันที่แล้ว`),
-      theme: "สลับโหมดสว่าง/มืด", lang: "EN",
+      theme: "สลับโหมดสว่าง/มืด", lang: "EN", watchTip: "ตรงกับ watchlist", settings: "ตั้งค่า",
     },
     en: {
       cyber: "Cyber Security", it: "IT", finance: "Finance", disaster: "Weather & Disasters",
@@ -15,7 +15,7 @@
       th: "Thailand", global: "Global", north: "Northern Thailand", sources: (n) => `${n} sources`,
       why: "Why it matters", raw: "Original headline (not summarized)", live: "Live", error: "Could not load",
       ago: (m) => (m < 60 ? `${Math.max(1, m)} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} d ago`),
-      theme: "Toggle light/dark mode", lang: "ไทย",
+      theme: "Toggle light/dark mode", lang: "ไทย", watchTip: "On your watchlist", settings: "Settings",
     },
   };
   const SEV = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
@@ -41,7 +41,10 @@
   };
 
   // Internal story page when the story has an id; the publisher's page otherwise (older briefs).
-  const storyHref = (it) => (it.id ? `/story.html?id=${it.id}` : it.url);
+  // An archived edition adds &d= so the story page can fall back to that day's summary.
+  // /story, not /story.html: static assets redirect .html paths, which costs a round trip.
+  let edition = null;
+  const storyHref = (it) => (it.id ? `/story?id=${it.id}${edition ? `&d=${edition}` : ""}` : it.url);
   // data-url carries the publisher URL so click counts match stored articles.
   const link = (href, text, kind, cat, url) => {
     const external = /^https?:/.test(href);
@@ -71,6 +74,7 @@
       el("span", {}, it.sourceName),
       it.published ? el("span", {}, timeAgo(it.published)) : null,
       it.north ? el("span", { class: "chip north" }, t("north")) : null,
+      ...(it.watch || []).map((w) => el("span", { class: "chip watch", title: t("watchTip") }, `★ ${w}`)),
       it.coverage > 1 ? el("span", { class: "chip", title: (it.alsoReported || []).join(", ") }, t("sources", it.coverage)) : null,
       el("span", { class: "chip" }, t(it.region)),
     );
@@ -178,9 +182,20 @@
     try { navigator.sendBeacon("/api/click", new Blob([body], { type: "application/json" })); } catch {}
   });
 
+  // Installable app and offline reading (public/sw.js). Pages work the same without it.
+  if ("serviceWorker" in navigator) {
+    addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+  }
+
+  // Ask the service worker to keep these API responses for offline reading.
+  function precache(urls) {
+    navigator.serviceWorker?.ready.then((reg) => reg.active?.postMessage({ type: "precache", urls })).catch(() => {});
+  }
+
   window.SF = {
-    TEXT, t, el, link, media, kicker, meta, storyHref, timeAgo, store, initControls, startTicker,
+    TEXT, t, el, link, media, kicker, meta, storyHref, timeAgo, store, initControls, startTicker, precache,
     get lang() { return lang; },
     onLang(fn) { listeners.push(fn); },
+    setEdition(date) { edition = date || null; },
   };
 })();

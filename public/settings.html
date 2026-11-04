@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>ตั้งค่า · SecFin Brief</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+  <script>try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Noto+Serif+Thai:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="wrap topbar">
+      <a class="brand" href="/" style="font-size:1.25rem">SecFin <span>Brief</span></a>
+      <div class="controls">
+        <button class="icon-btn" id="lang" type="button">EN</button>
+        <button class="icon-btn" id="theme" type="button"></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="settings-wrap">
+    <a class="back" href="/" data-t="back">← กลับหน้าแรก</a>
+    <h1 data-t="settings">ตั้งค่า</h1>
+
+    <section class="rail-box">
+      <form id="key-form">
+        <label for="key" data-t="keyLabel">Admin key</label>
+        <input id="key" type="password" autocomplete="current-password" required>
+        <div class="row-actions">
+          <button class="btn" type="submit" data-t="unlock">เปิด</button>
+          <span class="status" id="key-status" data-t="keyHint">เก็บไว้ในแท็บนี้เท่านั้น ปิดแท็บแล้วต้องใส่ใหม่</span>
+        </div>
+      </form>
+    </section>
+
+    <div id="panels" hidden>
+      <section class="rail-box">
+        <form id="settings-form">
+          <h3 data-t="watchTitle">Watchlist</h3>
+          <p data-t="watchHelp">หนึ่งคำต่อบรรทัด เช่น vendor, ผลิตภัณฑ์ หรือบริษัท คำภาษาอังกฤษจับทั้งคำ ไม่สนตัวพิมพ์ ข่าวที่ตรงจะถูกดันขึ้นในบรีฟและติดป้าย ★ คำเหล่านี้จะปรากฏบนหน้าเว็บที่เปิดสาธารณะ</p>
+          <textarea id="watch" spellcheck="false"></textarea>
+          <div class="row-actions">
+            <button class="btn" type="submit" data-t="save">บันทึก</button>
+            <span class="status" id="save-status"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="rail-box">
+        <h3 data-t="healthTitle">สถานะระบบ</h3>
+        <p data-t="healthHelp">สิ่งที่ต้องตรวจสอบตอนนี้: บรีฟ, บทสรุปละเอียด, feed และโควตา Neuron</p>
+        <div id="health"></div>
+        <div class="row-actions"><button class="btn ghost" id="health-btn" type="button" data-t="recheck">ตรวจอีกครั้ง</button></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/common.js"></script>
+  <script src="/settings.js"></script>
+</body>
+</html>

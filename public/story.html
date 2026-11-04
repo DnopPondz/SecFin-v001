@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SecFin Brief</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1012" media="(prefers-color-scheme: dark)">
   <script>try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -28,6 +33,10 @@
   <main class="story-wrap">
     <a class="back" href="/" data-t="back">← กลับหน้าแรก</a>
     <article class="story" id="story"><p class="empty" data-t="loading">กำลังโหลด…</p></article>
+    <section class="timeline" id="timeline" hidden>
+      <h2 data-t="timeline">ไทม์ไลน์ของข่าวนี้</h2>
+      <ol id="timeline-list"></ol>
+    </section>
     <section class="related" id="related" hidden>
       <h2 data-t="related">ข่าวอื่นในหมวดนี้</h2>
       <div class="list" id="related-list"></div>
@@ -40,5 +49,6 @@
 
   <script src="/common.js"></script>
   <script src="/story.js"></script>
+  <script src="/chat.js"></script>
 </body>
 </html>

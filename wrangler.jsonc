@@ -9,7 +9,7 @@
   // Static frontend. Asset requests are served without invoking the Worker.
   "assets": { "directory": "./public" },
   "ai": { "binding": "AI" },
-  // Hourly: queue every feed. 22:30 UTC = 05:30 Thai time: start the brief Workflow.
+  // Hourly: queue every feed and refresh the PM2.5 and market panels. 22:30 UTC = 05:30 Thai time: start the brief Workflow.
   // Saturday 23:00 UTC = Sunday 06:00 Thai time: weekly PDF.
   // Workers Free allows 5 Cron Triggers per account; this uses 3. Keep BRIEF_CRON and WEEKLY_CRON in src/index.ts in sync.
   "triggers": { "crons": ["0 * * * *", "30 22 * * *", "0 23 * * 6"] },

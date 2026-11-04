@@ -12,6 +12,8 @@ export interface Article {
   published_at: number;
   cluster_id?: string | null;
   image?: string | null;
+  // Watchlist terms matched at ingest, comma-separated.
+  watch?: string | null;
   // Filled by collapseClusters: how many distinct sources carried the story, and which others.
   coverage?: number;
   alsoIn?: string[];
@@ -37,7 +39,9 @@ export function collapseClusters(rows: Article[]): Article[] {
     const top = Math.max(...counts.values());
     const category = counts.get(rep.category) === top ? rep.category : [...counts].find(([, c]) => c === top)![0];
     const sources = [...new Set(members.map((m) => m.source))];
-    return { ...rep, category, coverage: sources.length, alsoIn: sources.filter((s) => s !== rep.source) };
+    // Any member's watchlist match counts for the story.
+    const watch = [...new Set(members.flatMap((m) => (m.watch ? m.watch.split(",") : [])))].join(",") || null;
+    return { ...rep, category, watch, coverage: sources.length, alsoIn: sources.filter((s) => s !== rep.source) };
   });
 }
 

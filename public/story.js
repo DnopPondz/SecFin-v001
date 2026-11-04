@@ -8,6 +8,7 @@
     photo: (s) => `ภาพ: ${s}`, notFound: "ไม่พบข่าวนี้ อาจเก่ากว่า 14 วันแล้ว",
     basisSnippet: "สรุปจากหัวข้อและเนื้อหาย่อเท่านั้น เพราะเปิดหน้าข่าวต้นฉบับไม่ได้ อ่านรายละเอียดเพิ่มเติมที่ต้นฉบับ",
     pending: "บทสรุปแบบละเอียดของข่าวนี้ยังไม่พร้อม ตอนนี้แสดงสรุปสั้นจากฉบับเช้า",
+    timeline: "ไทม์ไลน์ของข่าวนี้", first: "รายงานแรก", thisOne: "ข่าวนี้",
     footer: "สรุปโดย AI จากข่าวต้นฉบับ รูปภาพเป็นของแหล่งข่าวต้นฉบับ โปรดอ่านต้นฉบับก่อนตัดสินใจ",
   });
   Object.assign(window.SF.TEXT.en, {
@@ -16,12 +17,16 @@
     photo: (s) => `Photo: ${s}`, notFound: "Story not found. It may be older than 14 days.",
     basisSnippet: "Summarised from the headline and snippet only, because the publisher's page could not be read. See the original for details.",
     pending: "The detailed write-up for this story is not ready yet. Showing the short summary from the morning brief.",
+    timeline: "How this story developed", first: "First report", thisOne: "This story",
     footer: "AI summaries of the original reporting. Images belong to the original publishers. Read the original before acting on it.",
   });
 
-  const id = new URLSearchParams(location.search).get("id") || "";
+  const params = new URLSearchParams(location.search);
+  const id = params.get("id") || "";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(params.get("d") || "") ? params.get("d") : "";
   let data = null; // { detail } or { brief }
   let latest = null;
+  let timeline = [];
   const $ = (s) => document.querySelector(s);
 
   function cveChips(cves) {
@@ -82,6 +87,20 @@
       );
     }
     renderRelated(cat, s.url);
+    renderTimeline(s.url);
+  }
+
+  // Every source that carried this story (same cluster), oldest first. Shown only when there is more than one.
+  function renderTimeline(url) {
+    const fmt = (ms) => new Date(ms).toLocaleString(SF.lang === "th" ? "th-TH" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
+    $("#timeline").hidden = timeline.length < 2;
+    $("#timeline-list").replaceChildren(...timeline.map((it, i) => el("li", { class: it.url === url ? "current" : null },
+      el("time", {}, fmt(it.published)),
+      el("div", {},
+        el("div", { class: "meta" }, el("span", {}, it.sourceName),
+          i === 0 ? el("span", { class: "chip" }, t("first")) : null,
+          it.url === url ? el("span", { class: "chip" }, t("thisOne")) : null),
+        link(it.url, it.title, "timeline", data?.detail?.category ?? data?.brief?.category ?? "", it.url)))));
   }
 
   function renderRelated(cat, url) {
@@ -93,12 +112,18 @@
   }
 
   async function load() {
-    const [story, brief] = await Promise.all([
-      /^[0-9a-f]{64}$/.test(id) ? fetch(`/api/story/${id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) : null,
-      fetch("/api/brief/latest").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    const valid = /^[0-9a-f]{64}$/.test(id);
+    const json = (url) => fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const [story, brief, events] = await Promise.all([
+      valid ? json(`/api/story/${id}${date ? `?d=${date}` : ""}`) : null,
+      json(date ? `/api/brief/${date}` : "/api/brief/latest"),
+      valid ? json(`/api/story/${id}/timeline`) : null,
     ]);
     data = story;
     latest = brief;
+    timeline = Array.isArray(events) ? events : [];
+    SF.setEdition(date);
+    if (date) $(".back").href = `/?d=${date}`;
     render();
   }
 

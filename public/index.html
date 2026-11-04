@@ -7,6 +7,11 @@
   <meta name="description" content="สรุปข่าว IT, Cyber Security, การเงิน และสภาพอากาศ ไทยและต่างประเทศ ทุกเช้า">
   <script>try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
   <link rel="alternate" type="application/rss+xml" title="SecFin Brief" href="/rss.xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1012" media="(prefers-color-scheme: dark)">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Noto+Serif+Thai:wght@600;700&display=swap" rel="stylesheet">
@@ -61,22 +66,30 @@
     </main>
 
     <aside class="rail">
+      <section class="rail-box" id="air-box" hidden>
+        <h3 data-t="airTitle">ฝุ่น PM2.5 ภาคเหนือ</h3>
+        <div id="air"></div>
+      </section>
+
+      <section class="rail-box" id="watch-box" hidden>
+        <h3 data-t="watchTitle">ตรงกับ watchlist</h3>
+        <p data-t="watchHint">ข่าว 3 วันล่าสุดที่ตรงกับคำที่ตั้งไว้</p>
+        <ul class="watch-list" id="watch"></ul>
+      </section>
+
+      <section class="rail-box" id="markets-box" hidden>
+        <h3 data-t="marketsTitle">ตลาด</h3>
+        <div id="markets"></div>
+      </section>
+
+      <section class="rail-box" id="fuel-box" hidden>
+        <h3 data-t="fuelTitle">ราคาน้ำมันในไทย</h3>
+        <div id="fuel"></div>
+      </section>
+
       <section class="rail-box" id="popular-box" hidden>
         <h3 data-t="popular">อ่านมากสุดสัปดาห์นี้</h3>
         <ol class="popular" id="popular"></ol>
-      </section>
-
-      <section class="rail-box" id="ask">
-        <h3 data-t="askTitle">ถามข่าว</h3>
-        <p data-t="askHint">ถามเกี่ยวกับข่าว 14 วันล่าสุด AI ตอบจากข่าวในคลังเท่านั้นและบอกแหล่งที่มา</p>
-        <form id="ask-form" class="ask-form">
-          <textarea id="ask-q" rows="3" minlength="5" maxlength="300" required></textarea>
-          <div class="ask-row">
-            <div id="turnstile"></div>
-            <button class="btn" id="ask-btn" type="submit" data-t="askBtn">ถาม</button>
-          </div>
-        </form>
-        <div class="answer" id="answer" hidden></div>
       </section>
 
       <section class="rail-box">
@@ -93,10 +106,11 @@
   <footer class="foot">
     <p data-t="footer">สรุปโดย AI จากหัวข้อและเนื้อหาย่อของแหล่งข่าว รูปภาพเป็นของแหล่งข่าวต้นฉบับ โปรดอ่านต้นฉบับก่อนตัดสินใจ</p>
     <p id="notes"></p>
+    <p><a href="/settings" data-t="settings">ตั้งค่า</a></p>
   </footer>
 
   <script src="/common.js"></script>
   <script src="/app.js"></script>
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
+  <script src="/chat.js"></script>
 </body>
 </html>

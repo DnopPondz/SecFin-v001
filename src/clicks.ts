@@ -5,7 +5,7 @@ import { CATEGORIES } from "./sources";
 // the Analytics SQL binding (no API token). URLs are checked against stored articles before they
 // are shown, so a forged beacon cannot put an arbitrary link on the page.
 
-const KINDS = ["brief", "search", "ticker", "ask", "popular"] as const;
+const KINDS = ["brief", "search", "ticker", "ask", "popular", "watch", "timeline"] as const;
 const POPULAR_TTL_SECONDS = 1800;
 
 export interface ClickBody {

@@ -33,6 +33,7 @@ export interface StoryDetail {
   alsoReported: string[];
   cves: BriefItem["cves"];
   north: boolean;
+  watch?: string[];
   basis: "article" | "snippet"; // whether the publisher's page could be read
   generatedAt: number;
 }
@@ -159,6 +160,7 @@ export function mergeStory(item: BriefItem, category: Category, image: string | 
     alsoReported: item.alsoReported,
     cves: item.cves,
     north: item.north,
+    watch: item.watch ?? [],
     basis,
     generatedAt: now,
   };

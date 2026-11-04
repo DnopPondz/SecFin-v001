@@ -32,6 +32,7 @@ export interface BriefItem {
   sourceText: string; // original headline + snippet, kept so CVE ids come from the publisher, not the model
   cves: CveInfo[];
   north: boolean; // mentions Northern Thailand (keyword match on the publisher's text)
+  watch?: string[]; // watchlist terms the story matched (missing in briefs before 2026-11-04)
 }
 
 export interface Section {
@@ -66,6 +67,11 @@ const SEVERITY_HINT: Partial<Record<Category, string>> = {
 function disasterPriority(a: Article): number {
   if (isNorth(`${a.title} ${a.snippet}`)) return 2;
   return a.region === "th" ? 1 : 0;
+}
+
+// Watchlist stories go ahead of everything else on the shortlist; the model still picks the final 5.
+export function priorityOf(category: Category, a: Article): number {
+  return (a.watch ? 3 : 0) + (category === "disaster" ? disasterPriority(a) : 0);
 }
 
 const ItemSchema = z.object({
@@ -107,7 +113,7 @@ const JSON_SCHEMA = {
 export function buildMessages(category: Category, candidates: Article[]): ChatMessage[] {
   const list = candidates
     .map((a, i) => {
-      const reach = `${(a.coverage ?? 1) > 1 ? `, reported by ${a.coverage} sources` : ""}${isNorth(`${a.title} ${a.snippet}`) ? ", Northern Thailand" : ""}`;
+      const reach = `${(a.coverage ?? 1) > 1 ? `, reported by ${a.coverage} sources` : ""}${isNorth(`${a.title} ${a.snippet}`) ? ", Northern Thailand" : ""}${a.watch ? ", on the reader's watchlist" : ""}`;
       return `[${i}] (${sourceById(a.source)?.name ?? a.source}, ${a.region === "th" ? "Thailand" : "global"}${reach}) ${a.title}\n${a.snippet}`;
     })
     .join("\n\n");
@@ -126,6 +132,7 @@ export function buildMessages(category: Category, candidates: Article[]): ChatMe
         `Section: ${SECTION_LABEL[category]}.`,
         `Pick the ${ITEMS_PER_SECTION} most significant distinct stories below, most important first. Include Thai stories when they are relevant to Thailand.`,
         "A story reported by several sources is usually more significant, but judge by impact.",
+        "Items on the reader's watchlist concern products, vendors or companies the reader works with: include them unless they are trivial.",
         "For each: i (the item number), title_th and title_en (short headline), summary_th and summary_en (2 sentences),",
         "why_th and why_en (1 sentence: the practical impact or what a reader in Thailand should check or do),",
         `severity (${SEVERITY_HINT[category] ?? "always none"}).`,
@@ -154,6 +161,7 @@ function toItem(a: Article, ai?: z.infer<typeof ItemSchema>): BriefItem {
     sourceText: `${a.title} ${a.snippet}`,
     cves: [],
     north: isNorth(`${a.title} ${a.snippet}`),
+    watch: a.watch ? a.watch.split(",") : [],
   };
 }
 
@@ -176,12 +184,12 @@ export function mergePicks(candidates: Article[], raw: unknown): BriefItem[] {
 // All recent articles across every section, so a story's coverage counts sources in any section.
 async function candidatesFor(env: Env, category: Category, now: number): Promise<Article[]> {
   const { results } = await env.DB.prepare(
-    "SELECT id, url, source, category, region, lang, title, snippet, published_at, cluster_id, image FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT 1000",
+    "SELECT id, url, source, category, region, lang, title, snippet, published_at, cluster_id, image, watch FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT 1000",
   )
     .bind(now - WINDOW_MS)
     .all<Article>();
   const stories = collapseClusters(results).filter((a) => a.category === category);
-  return pickCandidates(category === "disaster" ? stories.map((a) => ({ ...a, priority: disasterPriority(a) })) : stories);
+  return pickCandidates(stories.map((a) => ({ ...a, priority: priorityOf(category, a) })));
 }
 
 // Throws when the AI call fails so the Workflow step can retry it; rawSection is the fallback.

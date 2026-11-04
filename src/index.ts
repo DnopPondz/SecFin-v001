@@ -5,11 +5,15 @@ import type { Brief } from "./brief";
 import { popular, recordClick, validClick, type ClickBody } from "./clicks";
 import { enqueueFeeds, handleIngest, type IngestMessage } from "./ingest";
 import { renderRss } from "./rss";
+import { healthProblems } from "./health";
 import { search } from "./search";
+import { loadSettings, normalizeSettings, retagRecent, saveSettings } from "./settings";
+import { sourceById } from "./sources";
 import { backfillBriefImages } from "./story";
 import { thaiDate } from "./time";
 import { verifyTurnstile } from "./turnstile";
 import { loadWeekBriefs, makeWeeklyPdf, renderWeeklyHtml } from "./weekly";
+import { loadWidgets, refreshWidgets } from "./widgets";
 
 export { BriefWorkflow } from "./workflow";
 export { LiveFeed } from "./live";
@@ -49,12 +53,17 @@ app.get("/api/brief/:date{\\d{4}-\\d{2}-\\d{2}}", async (c) => {
 });
 
 // Detailed write-up for one story. Falls back to the brief entry while the write-up is still being
-// generated (or if the publisher's page could not be summarised), so the story page always has content.
+// generated (or if the publisher's page could not be summarised, or the write-up was pruned after
+// 14 days), so the story page always has content. ?d=YYYY-MM-DD names the edition the link came from.
 app.get("/api/story/:id{[0-9a-f]{64}}", async (c) => {
   const id = c.req.param("id");
   const row = await c.env.DB.prepare("SELECT body FROM stories WHERE id = ?").bind(id).first<{ body: string }>();
   if (row) return c.body(`{"detail":${row.body}}`, 200, jsonHeaders);
-  const latest = await latestBrief(c.env);
+  const date = c.req.query("d");
+  const edition = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? (await c.env.DB.prepare("SELECT body FROM briefs WHERE date = ?").bind(date).first<{ body: string }>())?.body
+    : null;
+  const latest = edition ?? (await latestBrief(c.env));
   const brief = latest ? (JSON.parse(latest) as Brief) : null;
   for (const [category, items] of Object.entries(brief?.sections ?? {})) {
     const item = items.find((it) => it.id === id);
@@ -63,9 +72,46 @@ app.get("/api/story/:id{[0-9a-f]{64}}", async (c) => {
   return c.json({ ok: false, error: "ไม่พบข่าวนี้" }, 404);
 });
 
+// Every source that carried the story, oldest first (articles are kept 14 days).
+app.get("/api/story/:id{[0-9a-f]{64}}/timeline", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    "SELECT url, source, title, published_at FROM articles WHERE cluster_id = (SELECT cluster_id FROM articles WHERE id = ?) ORDER BY published_at LIMIT 30",
+  )
+    .bind(c.req.param("id"))
+    .all<{ url: string; source: string; title: string; published_at: number }>();
+  const items = results.map((r) => ({ url: r.url, title: r.title, sourceName: sourceById(r.source)?.name ?? r.source, published: r.published_at }));
+  return c.json(items, 200, { "Cache-Control": "public, max-age=600" });
+});
+
 app.get("/api/briefs", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT date FROM briefs ORDER BY date DESC LIMIT 30").all<{ date: string }>();
+  const { results } = await c.env.DB.prepare("SELECT date FROM briefs ORDER BY date DESC LIMIT 90").all<{ date: string }>();
   return c.json(results.map((r) => r.date), 200, { "Cache-Control": "public, max-age=300" });
+});
+
+// PM2.5 for the northern provinces and market numbers, refreshed hourly by the cron.
+app.get("/api/widgets", async (c) => {
+  const w = await loadWidgets(c.env);
+  return w ? c.json(w, 200, { "Cache-Control": "public, max-age=600" }) : c.json({ ok: false, error: "ยังไม่มีข้อมูล" }, 404);
+});
+
+// Watchlist matches from the last 72 hours, one per story.
+app.get("/api/watch", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    "SELECT url, source, category, title, published_at, watch, cluster_id FROM articles WHERE watch IS NOT NULL AND published_at >= ? ORDER BY published_at DESC LIMIT 40",
+  )
+    .bind(Date.now() - 72 * 3_600_000)
+    .all<{ url: string; source: string; category: string; title: string; published_at: number; watch: string; cluster_id: string | null }>();
+  const seen = new Set<string>();
+  const items = results
+    .filter((r) => {
+      const key = r.cluster_id ?? r.url;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8)
+    .map((r) => ({ url: r.url, title: r.title, category: r.category, sourceName: sourceById(r.source)?.name ?? r.source, published: r.published_at, watch: r.watch.split(",") }));
+  return c.json(items, 200, { "Cache-Control": "public, max-age=300" });
 });
 
 // Each search costs Neurons, so it has its own tighter per-IP limit on top of the daily budget.
@@ -171,7 +217,27 @@ app.post("/api/admin/run", async (c) => {
   if (task === "brief") return c.json({ workflow: await startBrief(c.env, Date.now()) });
   if (task === "weekly") return c.json(await makeWeeklyPdf(c.env));
   if (task === "images") return c.json({ patched: await backfillBriefImages(c.env, thaiDate(Date.now())) });
-  return c.json({ ok: false, error: "task must be ingest, brief, weekly or images" }, 400);
+  if (task === "widgets") return c.json(await refreshWidgets(c.env));
+  return c.json({ ok: false, error: "task must be ingest, brief, weekly, images or widgets" }, 400);
+});
+
+app.get("/api/admin/settings", async (c) => {
+  if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
+  return c.json({ settings: await loadSettings(c.env) });
+});
+
+// Saving re-tags the last 72 hours of articles so the front page and the next brief use the new list.
+app.put("/api/admin/settings", async (c) => {
+  if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
+  const settings = normalizeSettings(await c.req.json().catch(() => null));
+  await saveSettings(c.env, settings);
+  return c.json({ settings, retagged: await retagRecent(c.env, settings.watch) });
+});
+
+// What needs attention right now: missing brief, unfinished write-ups, feed problems, Neuron spend.
+app.get("/api/admin/health", async (c) => {
+  if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
+  return c.json({ problems: await healthProblems(c.env, Date.now()) });
 });
 
 // Same as /api/ask without Turnstile, for checking answer quality from a script.
@@ -223,6 +289,11 @@ export default {
       return;
     }
     console.log("queued feeds", await enqueueFeeds(env));
+    try {
+      await refreshWidgets(env, controller.scheduledTime);
+    } catch (err) {
+      console.error("widgets:", err);
+    }
   },
   queue: handleIngest,
 } satisfies ExportedHandler<Env, IngestMessage>;
