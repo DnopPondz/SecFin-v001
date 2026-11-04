@@ -5,7 +5,7 @@
   Object.assign(window.SF.TEXT.th, {
     back: "← กลับหน้าแรก", sourcesTitle: "แหล่งข่าวและวิธีสรุป", howTitle: "เราสรุปข่าวอย่างไร", tiersTitle: "ประเภทแหล่งข่าว",
     missingTitle: "แหล่งทางการที่ยังไม่มี",
-    missingText: "ยังไม่มี feed ที่ใช้งานได้จาก สกมช., ปภ., ธนาคารแห่งประเทศไทย, ตลาดหลักทรัพย์ฯ และประกาศเตือนภัยอากาศของกรมอุตุนิยมวิทยา (ตรวจล่าสุด 4 พ.ย. 2569) จะเพิ่มเมื่อมี feed ที่ใช้ได้",
+    missingText: "ยังไม่มี feed ที่ใช้งานได้จาก ปภ., ธนาคารแห่งประเทศไทย (ยกเลิก RSS ตั้งแต่ 28 เม.ย. 2566) และตลาดหลักทรัพย์ฯ (ตรวจล่าสุด 4 พ.ย. 2569) ข่าวจากหน่วยงานเหล่านี้ยังเข้ามาทางสื่อที่รายงานต่อ จะเพิ่มเมื่อมี feed ที่ใช้ได้ ส่วน สกมช. ใช้ feed ของ ThaiCERT ซึ่งเป็นศูนย์รับแจ้งเหตุของ สกมช. และประกาศเตือนภัยของกรมอุตุนิยมวิทยาใช้ feed CAP ของกรมฯ",
     how: [
       "ดึงหัวข่าวและเนื้อหาย่อจากแหล่งข่าวด้านล่างทุกชั่วโมง ไม่เก็บเนื้อข่าวเต็ม",
       "ข่าวเรื่องเดียวกันจากหลายแหล่งถูกรวมเป็นเรื่องเดียว และลิงก์ไปที่แหล่งที่น่าเชื่อถือที่สุด (ทางการ > สื่อหลัก > เฉพาะทาง)",
@@ -21,7 +21,7 @@
   Object.assign(window.SF.TEXT.en, {
     back: "← Front page", sourcesTitle: "Sources and how we summarise", howTitle: "How stories are summarised", tiersTitle: "Source types",
     missingTitle: "Official sources not yet included",
-    missingText: "No usable feed yet from Thailand's NCSA, the Department of Disaster Prevention and Mitigation, the Bank of Thailand, the Stock Exchange of Thailand, or the Thai Meteorological Department's weather warnings (last checked 4 Nov 2026). They will be added when a working feed exists.",
+    missingText: "No usable feed yet from the Department of Disaster Prevention and Mitigation, the Bank of Thailand (its RSS ended on 28 April 2023) or the Stock Exchange of Thailand (last checked 4 Nov 2026). Their news still arrives through outlets that report it, and they will be added when a working feed exists. NCSA is covered by ThaiCERT, its incident response centre, and Thai Meteorological Department warnings come from the department's CAP feed.",
     how: [
       "Headlines and short snippets are fetched from the sources below every hour. Full articles are never stored.",
       "The same story from several sources is merged into one, linked to the most credible source (official > mainstream > specialist).",

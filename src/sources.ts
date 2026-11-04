@@ -39,14 +39,18 @@ const NOTE_TABLOID = { th: "สื่อหลักที่พาดหัว�
 // Left out on purpose: CISA all.xml (5.7 MB; the advisories-only feed below is used instead), NCSA (empty feed),
 // Yahoo Finance and Bank of Thailand (404), BleepingComputer (403 to requests from Workers; not worked around).
 // Official sources added 2026-11-04: CISA advisories (whole advisories in each item, so read
-// capped at 700 KB, about two items, enough for an hourly fetch) and Fortinet PSIRT. Checked and
-// not usable on 2026-11-04: สกมช. (empty), ปภ. and ธปท. (404), SET (no feed), MSRC blog (no feed),
-// TMD warning API demo key (returns 2022 sample data).
+// capped at 700 KB, about two items, enough for an hourly fetch), Fortinet PSIRT, and TMD's CAP
+// warnings feed (listed on tmd.go.th/service/rss, public domain, no key). Checked and not usable on
+// 2026-11-04: สกมช.'s own site (a JavaScript app with no feed; its incident team ThaiCERT, contact
+// thaicert@ncsa.or.th, is already below), ปภ. (no feed on disaster.go.th), ธปท. (RSS ended
+// 28 April 2023, news page loads from an unpublished API), SET (no feed), NNT/PRD (404),
+// MSRC blog (no feed), TMD warning-news XML (newest item April 2025), TMD warning API demo key
+// (2022 sample data).
 export const SOURCES: Source[] = [
   { id: "thn", name: "The Hacker News", url: "https://feeds.feedburner.com/TheHackersNews", category: "cyber", region: "global", lang: "en", tier: "specialist", note: NOTE_SPONSORED },
   { id: "krebs", name: "Krebs on Security", url: "https://krebsonsecurity.com/feed/", category: "cyber", region: "global", lang: "en", tier: "specialist" },
   { id: "securityweek", name: "SecurityWeek", url: "https://www.securityweek.com/feed/", category: "cyber", region: "global", lang: "en", tier: "specialist" },
-  { id: "thaicert", name: "ThaiCERT", url: "https://www.thaicert.or.th/feed/", category: "cyber", region: "th", lang: "th", tier: "official" },
+  { id: "thaicert", name: "ThaiCERT (สกมช.)", url: "https://www.thaicert.or.th/feed/", category: "cyber", region: "th", lang: "th", tier: "official" },
   { id: "cisa", name: "CISA Advisories", url: "https://www.cisa.gov/cybersecurity-advisories/cybersecurity-advisories.xml", category: "cyber", region: "global", lang: "en", tier: "official", maxBytes: 700_000 },
   { id: "fortinet-psirt", name: "Fortinet PSIRT", url: "https://filestore.fortinet.com/fortiguard/rss/ir.xml", category: "cyber", region: "global", lang: "en", tier: "official" },
   { id: "register", name: "The Register", url: "https://www.theregister.com/headlines.atom", category: "it", region: "global", lang: "en", tier: "mainstream" },
@@ -59,7 +63,10 @@ export const SOURCES: Source[] = [
   { id: "prachachat", name: "ประชาชาติธุรกิจ", url: "https://www.prachachat.net/feed", category: "finance", region: "th", lang: "th", tier: "mainstream" },
   { id: "kaohoon", name: "ข่าวหุ้น", url: "https://www.kaohoon.com/feed", category: "finance", region: "th", lang: "th", tier: "specialist", note: NOTE_TIPS, filter: "no-tips" },
   // Weather and disasters, added 2026-11-03. Thai general and regional feeds are keyword-filtered.
-  // Left out: TMD weather warnings (no working feed), ปภ. (no RSS), Air4Thai PM2.5 (TLS chain fails validation).
+  // Left out: ปภ. (no RSS), Air4Thai PM2.5 (TLS chain fails validation; the side panel reads it through OpenAQ).
+  // TMD CAP items link to the CAP XML file (no per-warning page exists), so their write-ups use the
+  // feed text, which is the full warning.
+  { id: "tmd-warning", name: "กรมอุตุนิยมวิทยา (ประกาศเตือนภัย)", url: "https://www.tmd.go.th/api/xml/CAP", category: "disaster", region: "th", lang: "th", tier: "official" },
   { id: "gdacs", name: "GDACS", url: "https://www.gdacs.org/xml/rss.xml", category: "disaster", region: "global", lang: "en", tier: "official" },
   { id: "usgs", name: "USGS Earthquakes", url: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.atom", category: "disaster", region: "global", lang: "en", tier: "official" },
   { id: "tmdquake", name: "กรมอุตุนิยมวิทยา (แผ่นดินไหว)", url: "https://earthquake.tmd.go.th/feed/rss_inside.xml", category: "disaster", region: "th", lang: "th", tier: "official", minMagnitude: 3 },

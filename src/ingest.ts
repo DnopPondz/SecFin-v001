@@ -28,8 +28,8 @@ export interface IngestResult {
   embedded: number;
 }
 
-// Hourly cron: one queue message per feed. 23 feeds x 24 runs x 3 operations (write, read,
-// delete) is about 1,700 of the 10,000 free Queues operations a day.
+// Hourly cron: one queue message per feed. 24 feeds x 24 runs x 3 operations (write, read,
+// delete) is about 1,730 of the 10,000 free Queues operations a day.
 export async function enqueueFeeds(env: Env): Promise<number> {
   await env.INGEST_QUEUE.sendBatch(SOURCES.map((s, i) => ({ body: { source: s.id }, delaySeconds: i * STAGGER_SECONDS })));
   return SOURCES.length;
