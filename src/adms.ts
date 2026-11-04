@@ -415,7 +415,7 @@ export async function quotas(env: Env, now = Date.now()): Promise<{ quotas: Quot
   const workflows = await one("workflows", "SELECT SUM(stepCountDiff) AS n FROM events.workflows WHERE timestamp >= $today", { today });
   const vecQueries = await one("vectorize queries", "SELECT countIf(operation = 'vectorQuery') AS n FROM events.vectorizeOperations WHERE timestamp >= $month", { month });
   const d1Size = await one("d1 storage", "SELECT MAX(databaseSizeBytes) AS n FROM states.d1Storage WHERE timestamp >= $day1", { day1 });
-  const kvSize = await one("kv storage", "SELECT MAX(storedBytes) AS n FROM states.kvStorage WHERE timestamp >= $day1", { day1 });
+  // KV storage is left out: states.kvStorage answered 503 to every query shape on 2026-11-04.
   const vecSize = await one("vectorize storage", "SELECT MAX(vectorCount) AS n FROM states.vectorizeStorage WHERE timestamp >= $day1", { day1 });
   const meter = await safe("neuron meter", () => neuronsUsed(env, now), errors);
   const v = (row: Row | null, key = "n") => (row ? num(row[key]) : null);
@@ -437,7 +437,6 @@ export async function quotas(env: Env, now = Date.now()): Promise<{ quotas: Quot
       { id: "kvWrite", used: v(kv, "w"), limit: 1_000, unit: "writes", period: "day", source: "cloudflare" },
       { id: "kvDelete", used: v(kv, "d"), limit: 1_000, unit: "deletes", period: "day", source: "cloudflare" },
       { id: "kvList", used: v(kv, "l"), limit: 1_000, unit: "lists", period: "day", source: "cloudflare" },
-      { id: "kvStorage", used: v(kvSize) === null ? null : Math.round((v(kvSize)! / MB) * 10) / 10, limit: 1024, unit: "MB", period: "total", source: "cloudflare" },
       { id: "queues", used: v(queues), limit: 10_000, unit: "operations", period: "day", source: "cloudflare" },
       { id: "workflows", used: v(workflows), limit: 3_000, unit: "steps", period: "day", source: "cloudflare" },
       { id: "vectorizeQueried", used: vq === null ? null : vq * BGE_M3_DIMENSIONS, limit: 30_000_000, unit: "dimensions", period: "month", source: "cloudflare" },
