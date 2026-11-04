@@ -32,10 +32,37 @@ export function isThai(s: string): boolean {
   return /[฀-๿]/.test(s);
 }
 
-export function buildAskMessages(question: string, hits: SearchHit[]): ChatMessage[] {
+// Earlier turns of the chat, so "and what about that one?" can be resolved. The page sends at
+// most the last two; each is trimmed so a turn adds only a few Neurons.
+export interface Turn {
+  q: string;
+  a: string;
+}
+
+const MAX_TURNS = 2;
+
+export function validHistory(raw: unknown): Turn[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((t): t is { q: string; a: string } => typeof t?.q === "string" && typeof t?.a === "string")
+    .slice(-MAX_TURNS)
+    .map((t) => ({ q: t.q.trim().slice(0, 300), a: t.a.trim().slice(0, 600) }))
+    .filter((t) => t.q && t.a);
+}
+
+// Retrieval uses the previous question too, so a follow-up finds the same stories.
+export function retrievalQuery(question: string, history: Turn[]): string {
+  const prev = history.at(-1)?.q;
+  return prev ? `${prev} ${question}`.slice(0, 300) : question;
+}
+
+export function buildAskMessages(question: string, hits: SearchHit[], history: Turn[] = []): ChatMessage[] {
   const items = hits
     .map((h, i) => `[${i + 1}] ${h.sourceName}, ${new Date(h.published).toISOString().slice(0, 10)}: ${h.title}\n${h.snippet}`)
     .join("\n\n");
+  const earlier = history.length
+    ? `Earlier in this conversation (use it only to understand what the new question refers to; answer from the news items):\n${history.map((t) => `Q: ${t.q}\nA: ${t.a}`).join("\n")}\n\n`
+    : "";
   return [
     {
       role: "system",
@@ -47,7 +74,7 @@ export function buildAskMessages(question: string, hits: SearchHit[]): ChatMessa
     },
     {
       role: "user",
-      content: `Answer in ${isThai(question) ? "Thai" : "English"}. Put the numbers of the items you cited in "cited".\n\nQuestion: ${question}\n\nNews items:\n${items}`,
+      content: `Answer in ${isThai(question) ? "Thai" : "English"}. Put the numbers of the items you cited in "cited".\n\n${earlier}Question: ${question}\n\nNews items:\n${items}`,
     },
   ];
 }
@@ -63,12 +90,12 @@ export function mergeAnswer(hits: SearchHit[], raw: unknown): AskResult {
   };
 }
 
-export async function ask(env: Env, question: string, now = Date.now()): Promise<AskResult> {
-  const hits = await search(env, question, TOP_K);
+export async function ask(env: Env, question: string, now = Date.now(), history: Turn[] = []): Promise<AskResult> {
+  const hits = await search(env, retrievalQuery(question, history), TOP_K);
   if (hits.length === 0) {
     // No AI call when retrieval finds nothing: there is nothing to ground an answer in.
     return { answer: isThai(question) ? "ไม่พบข่าวที่เกี่ยวข้องในคลังข่าว 14 วันล่าสุด" : "No related stories in the last 14 days.", sources: [] };
   }
-  const { data } = await runJson(env, buildAskMessages(question, hits), JSON_SCHEMA, MAX_TOKENS, now, BRIEF_RESERVE);
+  const { data } = await runJson(env, buildAskMessages(question, hits, history), JSON_SCHEMA, MAX_TOKENS, now, BRIEF_RESERVE);
   return mergeAnswer(hits, data);
 }

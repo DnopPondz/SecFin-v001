@@ -136,3 +136,42 @@ test("goldBahtThb estimates a 96.5% baht-weight from spot and USD/THB", () => {
   assert.equal(goldBahtThb(4000, 33.75), 63850);
   assert.equal(goldBahtThb(4000, undefined), null);
 });
+
+test("balancePicks guarantees global and Thai stories without breaking the model's order", async () => {
+  const { balancePicks } = await import("../src/brief");
+  const it = (id: string, region: "th" | "global") => ({ id, region }) as never;
+  const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
+  // All-Thai top 5, globals ranked 6th and 7th: the two lowest Thai picks make room.
+  assert.deepEqual(ids(balancePicks([it("t1", "th"), it("t2", "th"), it("t3", "th"), it("t4", "th"), it("t5", "th"), it("g1", "global"), it("g2", "global")], 5, 2, 1)),
+    ["t1", "t2", "t3", "g1", "g2"]);
+  // All-global top 5 with a Thai story 6th: one global gives way.
+  assert.deepEqual(ids(balancePicks([it("g1", "global"), it("g2", "global"), it("g3", "global"), it("g4", "global"), it("g5", "global"), it("t1", "th")], 5, 2, 1)),
+    ["g1", "g2", "g3", "g4", "t1"]);
+  // Nothing to swap in: the picks stay as they are.
+  assert.deepEqual(ids(balancePicks([it("t1", "th"), it("t2", "th")], 5, 2, 1)), ["t1", "t2"]);
+  // No quota (weather section): plain top 5.
+  assert.equal(balancePicks([it("a", "th"), it("b", "th"), it("c", "th"), it("d", "th"), it("e", "th"), it("f", "global")], 5).length, 5);
+});
+
+test("sponsored and stock-tip filters skip promotions but keep real news", async () => {
+  const { admit, isSponsored, isStockTip } = await import("../src/select");
+  assert.equal(isSponsored("State-sponsored hackers breach telecoms"), false);
+  assert.equal(isSponsored("[Sponsored] Why zero trust matters"), true);
+  assert.equal(isSponsored("Webinar: Stop ransomware before it starts"), true);
+  assert.equal(isSponsored("Sponsored by Acme: cloud security guide"), true);
+  assert.equal(isSponsored("ข่าวประชาสัมพันธ์ บริษัทเปิดตัวสินค้าใหม่"), true);
+  assert.equal(isStockTip("โบรกฯ แนะซื้อ CPALL ราคาเป้า 75 บาท"), true);
+  assert.equal(isStockTip("หุ้นเด่นวันนี้"), true);
+  assert.equal(isStockTip("ดัชนี SET หลุด 1,500 จุด"), false);
+  const tips = { category: "finance" as const, filter: "no-tips" as const };
+  assert.equal(admit(tips, "แนะนำซื้อ PTT เป้าหมาย 40 บาท", ""), null);
+  assert.equal(admit(tips, "ธปท. คงดอกเบี้ยนโยบาย", ""), "finance");
+});
+
+test("a cluster is represented by its most credible source", async () => {
+  const { collapseClusters } = await import("../src/select");
+  const a = (id: string, source: string, published: number) => ({ id, url: `https://e.com/${id}`, source, category: "cyber" as const, region: "global" as const, lang: "en" as const, title: id, snippet: "", published_at: published, cluster_id: "c" });
+  const [story] = collapseClusters([a("thn", "thn", 3), a("cisa", "cisa", 1), a("sw", "securityweek", 2)]);
+  assert.equal(story.source, "cisa"); // official beats newer specialist coverage
+  assert.equal(story.coverage, 3);
+});

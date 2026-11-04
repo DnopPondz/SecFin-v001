@@ -10,6 +10,10 @@ export interface FeedItem {
 }
 
 const SNIPPET_CHARS = 300;
+// Some feeds (CISA advisories) put the whole document in <description>. Only the start becomes
+// the snippet, so only the start is cleaned: cleaning 130 KB per item blew the 10 ms CPU budget.
+const RAW_SUMMARY_CHARS = 4000;
+const IMAGE_SCAN_CHARS = 20000;
 
 export function parseFeed(xml: string, limit = 20): FeedItem[] {
   const items: FeedItem[] = [];
@@ -19,7 +23,8 @@ export function parseFeed(xml: string, limit = 20): FeedItem[] {
     const title = clean(tag(body, "title"));
     const link = kind === "entry" ? atomLink(body) : clean(tag(body, "link")) || clean(tag(body, "guid"));
     if (!title || !/^https?:\/\//.test(link)) continue;
-    const summary = truncate(clean(tag(body, "description") ?? tag(body, "summary") ?? tag(body, "content:encoded") ?? tag(body, "content")), SNIPPET_CHARS);
+    const rawSummary = tag(body, "description") ?? tag(body, "summary") ?? tag(body, "content:encoded") ?? tag(body, "content");
+    const summary = truncate(clean(rawSummary?.slice(0, RAW_SUMMARY_CHARS)), SNIPPET_CHARS);
     const date = tag(body, "pubDate") ?? tag(body, "published") ?? tag(body, "updated") ?? tag(body, "dc:date");
     const published = date ? Date.parse(clean(date)) : NaN;
     items.push({ title, link, summary, published: Number.isFinite(published) ? published : 0, image: imageOf(body) });
@@ -43,7 +48,7 @@ export function imageOf(body: string): string | null {
     attr(/<media:thumbnail\b([^>]*)>/g) ??
     attr(/<enclosure\b([^>]*)>/g) ??
     // Escaped or CDATA HTML in description/content: decode once, then look for an <img>.
-    decodeEntities(body.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i)?.[1] ??
+    decodeEntities(body.slice(0, IMAGE_SCAN_CHARS).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i)?.[1] ??
     null;
   return safeImageUrl(raw ? decodeEntities(raw) : null);
 }
@@ -53,6 +58,24 @@ export function safeImageUrl(url: string | null | undefined): string | null {
   if (!url || url.length > 1000 || !/^https?:\/\//i.test(url)) return null;
   if (/(?:pixel|spacer|1x1|feedburner\.com\/~r)/i.test(url)) return null;
   return url;
+}
+
+// Read at most maxBytes of a response body. A cut-off last item has no closing tag, so parseFeed
+// skips it; the newest items come first in every feed we use.
+export async function readLimited(res: Response, maxBytes: number): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let read = 0;
+  while (read < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value.byteLength;
+    text += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel().catch(() => {});
+  return text + decoder.decode();
 }
 
 function tag(body: string, name: string): string | undefined {

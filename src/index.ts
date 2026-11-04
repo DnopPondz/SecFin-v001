@@ -4,7 +4,7 @@ import {
   cached, storyReport, timingSafeEqualStr, traffic, validView, verifySession, type ViewBody,
 } from "./adms";
 import { BudgetExceeded, neuronsUsed } from "./ai";
-import { ask } from "./ask";
+import { ask, validHistory } from "./ask";
 import type { Brief } from "./brief";
 import { popular, recordClick, validClick, type ClickBody } from "./clicks";
 import { enqueueFeeds, handleIngest, type IngestMessage } from "./ingest";
@@ -12,7 +12,8 @@ import { renderRss } from "./rss";
 import { healthProblems } from "./health";
 import { search } from "./search";
 import { loadSettings, normalizeSettings, retagRecent, saveSettings } from "./settings";
-import { sourceById } from "./sources";
+import { openReports, resolveReport, saveReport, validReport, type ReportBody } from "./reports";
+import { SOURCES, sourceById } from "./sources";
 import { backfillBriefImages } from "./story";
 import { thaiDate } from "./time";
 import { verifyTurnstile } from "./turnstile";
@@ -135,7 +136,7 @@ app.get("/api/search", async (c) => {
 // Questions cost about 35 Neurons each: Turnstile, 3 per minute per IP, and the brief reserve.
 app.post("/api/ask", async (c) => {
   const ip = c.req.header("CF-Connecting-IP");
-  const body = (await c.req.json().catch(() => ({}))) as { q?: unknown; token?: unknown };
+  const body = (await c.req.json().catch(() => ({}))) as { q?: unknown; token?: unknown; history?: unknown };
   const q = typeof body.q === "string" ? body.q.trim() : "";
   if (q.length < 5 || q.length > 300) return c.json({ ok: false, error: "คำถามต้องยาว 5 ถึง 300 ตัวอักษร" }, 400);
   const { success } = await c.env.ASK_LIMITER.limit({ key: ip ?? "unknown" });
@@ -144,7 +145,7 @@ app.post("/api/ask", async (c) => {
     return c.json({ ok: false, error: "ยืนยันว่าไม่ใช่บอทไม่สำเร็จ ลองใหม่อีกครั้ง" }, 403);
   }
   try {
-    return c.json({ ok: true, ...(await ask(c.env, q)) });
+    return c.json({ ok: true, ...(await ask(c.env, q, Date.now(), validHistory(body.history))) });
   } catch (err) {
     if (err instanceof BudgetExceeded) return c.json({ ok: false, error: "วันนี้ใช้โควตา AI ครบแล้ว ลองใหม่พรุ่งนี้" }, 503);
     throw err;
@@ -162,6 +163,25 @@ app.post("/api/click", async (c) => {
   if (click) recordClick(c.env, click);
   return c.body(null, 204);
 });
+
+// "Report a mistake" from a story page. Bots are ignored; 3 per minute per IP.
+app.post("/api/report", async (c) => {
+  if (isBot(c.req.header("user-agent"))) return c.body(null, 204);
+  const { success } = await c.env.REPORT_LIMITER.limit({ key: c.req.header("CF-Connecting-IP") ?? "unknown" });
+  if (!success) return c.json({ ok: false, error: "too-many" }, 429);
+  const report = validReport((await c.req.json().catch(() => ({}))) as ReportBody);
+  if (!report) return c.json({ ok: false, error: "invalid" }, 400);
+  await saveReport(c.env, report);
+  return c.json({ ok: true });
+});
+
+// Every source with its type and caution note, for chips on cards and the /sources page.
+app.get("/api/sources", (c) =>
+  c.json(
+    SOURCES.map(({ id, name, url, category, region, lang, tier, note }) => ({ id, name, site: new URL(url).origin, category, region, lang, tier, note: note ?? null })),
+    200,
+    { "Cache-Control": "public, max-age=3600" },
+  ));
 
 // Page-view beacon for /adms. Bots are skipped; the owner's own visits are flagged, not dropped.
 app.post("/api/view", async (c) => {
@@ -259,9 +279,9 @@ app.get("/api/admin/health", async (c) => {
 // Same as /api/ask without Turnstile, for checking answer quality from a script.
 app.post("/api/admin/ask", async (c) => {
   if (!keyMatches(c.req.header("x-admin-key"), c.env.ADMIN_KEY)) return c.notFound();
-  const { q } = (await c.req.json().catch(() => ({}))) as { q?: string };
+  const { q, history } = (await c.req.json().catch(() => ({}))) as { q?: string; history?: unknown };
   if (!q) return c.json({ ok: false, error: "q required" }, 400);
-  return c.json(await ask(c.env, q));
+  return c.json(await ask(c.env, q, Date.now(), validHistory(history)));
 });
 
 // Screenshot of one of this site's own pages through Browser Run, for checking layout and themes.
@@ -325,6 +345,22 @@ app.get("/api/adms/stories", async (c) => {
   const owner = c.req.query("owner") === "1";
   const data = await cached(c.env, `stories:${days}:${owner ? 1 : 0}`, c.req.query("fresh") === "1", () => storyReport(c.env, days, owner));
   return c.json(data, 200, { "Cache-Control": "no-store" });
+});
+
+app.get("/api/adms/reports", async (c) => {
+  if (!(await admsSession(c))) return c.json({ ok: false }, 401);
+  return c.json(await openReports(c.env), 200, { "Cache-Control": "no-store" });
+});
+
+app.post("/api/adms/reports/:id{\\d+}/resolve", async (c) => {
+  if (!(await admsSession(c))) return c.json({ ok: false }, 401);
+  return c.json({ ok: await resolveReport(c.env, Number(c.req.param("id"))) });
+});
+
+// The same checks as the health report on /settings; D1 only, so not cached.
+app.get("/api/adms/health", async (c) => {
+  if (!(await admsSession(c))) return c.json({ ok: false }, 401);
+  return c.json({ problems: await healthProblems(c.env, Date.now()) }, 200, { "Cache-Control": "no-store" });
 });
 
 app.get("/api/adms/quotas", async (c) => {

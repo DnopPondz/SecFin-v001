@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>แหล่งข่าว · SecFin Brief</title>
+  <meta name="description" content="แหล่งข่าวที่ SecFin Brief ใช้ ประเภทของแต่ละแหล่ง และวิธีที่ AI สรุปข่าว">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+  <script>try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Noto+Serif+Thai:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="wrap topbar">
+      <a class="brand" href="/" style="font-size:1.25rem">SecFin <span>Brief</span></a>
+      <div class="controls">
+        <button class="icon-btn" id="lang" type="button">EN</button>
+        <button class="icon-btn" id="theme" type="button"></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="story-wrap sources-page">
+    <a class="back" href="/" data-t="back">← กลับหน้าแรก</a>
+    <h1 data-t="sourcesTitle">แหล่งข่าวและวิธีสรุป</h1>
+
+    <section class="callout">
+      <h2 data-t="howTitle">เราสรุปข่าวอย่างไร</h2>
+      <ul id="how"></ul>
+    </section>
+
+    <section>
+      <h2 data-t="tiersTitle">ประเภทแหล่งข่าว</h2>
+      <dl class="tiers" id="tiers"></dl>
+    </section>
+
+    <section id="list"></section>
+
+    <section>
+      <h2 data-t="missingTitle">แหล่งทางการที่ยังไม่มี</h2>
+      <p class="note" data-t="missingText"></p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p data-t="footer">สรุปโดย AI จากข่าวต้นฉบับ รูปภาพเป็นของแหล่งข่าวต้นฉบับ โปรดอ่านต้นฉบับก่อนตัดสินใจ</p>
+  </footer>
+
+  <script src="/common.js"></script>
+  <script src="/sources.js"></script>
+  <script src="/chat.js"></script>
+</body>
+</html>

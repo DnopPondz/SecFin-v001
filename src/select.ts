@@ -1,4 +1,4 @@
-import type { Category, Source } from "./sources";
+import { TIER_RANK, sourceById, type Category, type Source } from "./sources";
 
 export interface Article {
   id: string;
@@ -21,8 +21,11 @@ export interface Article {
   priority?: number;
 }
 
-// One row per story: the newest article represents its cluster, and the story goes to the
-// section most of its articles were filed under (ties keep the representative's section).
+const tierOf = (a: Article) => TIER_RANK[sourceById(a.source)?.tier ?? "specialist"];
+
+// One row per story: the article from the most credible source (official, then mainstream, then
+// specialist; newest first within a tier) represents its cluster, so the brief links there. The
+// story goes to the section most of its articles were filed under (ties keep the representative's).
 export function collapseClusters(rows: Article[]): Article[] {
   const groups = new Map<string, Article[]>();
   for (const a of rows) {
@@ -32,7 +35,7 @@ export function collapseClusters(rows: Article[]): Article[] {
     groups.set(key, list);
   }
   return [...groups.values()].map((members) => {
-    members.sort((p, q) => q.published_at - p.published_at);
+    members.sort((p, q) => tierOf(q) - tierOf(p) || q.published_at - p.published_at);
     const rep = members[0];
     const counts = new Map<Category, number>();
     for (const m of members) counts.set(m.category, (counts.get(m.category) ?? 0) + 1);
@@ -105,9 +108,26 @@ export function magnitude(text: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+// Paid or promotional pieces, wherever they say so in the headline or snippet.
+// Careful with bare "sponsored": "state-sponsored hackers" is ordinary cyber news.
+const SPONSORED = /\bsponsored\s+(?:post|content|article|by)\b|^\s*\[?sponsored\]?\s*[:|-]|[[(]sponsored[\])]|\bpartner content\b|\bpaid post\b|\badvertorial\b|^\s*\[?webinar\]?\s*[:|-]|บทความประชาสัมพันธ์|ข่าวประชาสัมพันธ์|^\s*ประชาสัมพันธ์\s*[:|]/i;
+
+export function isSponsored(text: string): boolean {
+  return SPONSORED.test(text);
+}
+
+// Stock recommendations and price targets read as news but are analysts' opinions.
+const STOCK_TIPS = /แนะ(?:นำ)?\s*["“]?(?:ซื้อ|ขาย|เก็งกำไร|สะสม|ถือ|trading|buy|sell)|ราคาเป้า|เป้าหมาย\s*\d|top\s*picks?|ท็อปพิก|หุ้นเด่น|หุ้นเด็ด|หุ้นน่าสน|แนวรับ|แนวต้าน|target price/i;
+
+export function isStockTip(text: string): boolean {
+  return STOCK_TIPS.test(text);
+}
+
 // Which section an item goes to, or null to skip it entirely.
 export function admit(source: Pick<Source, "category" | "filter" | "minMagnitude">, title: string, snippet: string): Category | null {
   const text = `${title} ${snippet}`;
+  if (isSponsored(title) || isSponsored(snippet.slice(0, 120))) return null;
+  if (source.filter === "no-tips" && isStockTip(text)) return null;
   if (source.filter === "disaster" && !isDisaster(text)) return null;
   if (source.minMagnitude !== undefined) {
     const mag = magnitude(text);

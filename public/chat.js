@@ -1,6 +1,7 @@
-// Floating "ask the news" chat on every reader page. Each question goes to /api/ask on its own
-// (the API keeps no conversation state); the transcript lives in sessionStorage so it follows the
-// reader from page to page within the tab. Turnstile loads only when the chat is first opened.
+// Floating "ask the news" chat on every reader page. Each question goes to /api/ask with the last
+// two answered turns, so follow-ups work (the API keeps no state of its own); the transcript lives
+// in sessionStorage so it follows the reader from page to page within the tab. Turnstile loads
+// only when the chat is first opened.
 (() => {
   const { el, link, t } = window.SF;
   const TURNSTILE_SITE_KEY = "0x4AAAAAAFxqSKUj6BrChqz1"; // public by design; the secret is a Worker secret
@@ -11,7 +12,7 @@
   Object.assign(window.SF.TEXT.th, {
     chatOpen: "ถามข่าวกับ AI", chatClose: "ปิดแชต", chatTitle: "ถามข่าว", chatSub: "ตอบจากข่าว 14 วันล่าสุด พร้อมแหล่งที่มา",
     chatHello: "สวัสดีครับ ถามเรื่องข่าว IT, Cyber, การเงิน หรืออากาศ ในช่วง 14 วันที่ผ่านมาได้เลย ผมจะตอบจากข่าวในคลังและบอกแหล่งที่มา",
-    chatNote: "แต่ละคำถามตอบแยกกัน ยังไม่จำคำถามก่อนหน้า",
+    chatNote: "ถามต่อจากคำตอบก่อนหน้าได้ ระบบจำ 2 คำถามล่าสุด กด \"ล้างแชต\" เพื่อเริ่มเรื่องใหม่",
     chatPlaceholder: "พิมพ์คำถาม…", chatSend: "ส่ง", chatClear: "ล้างแชต", chatSources: "แหล่งที่มา",
     chatChecking: "กำลังยืนยันว่าไม่ใช่บอท…", chatShort: "คำถามต้องยาว 5 ถึง 300 ตัวอักษร",
     chatTry: ["มีช่องโหว่อะไรที่ต้องรีบแพตช์บ้าง", "สรุปข่าวเศรษฐกิจไทยสัปดาห์นี้", "ภาคเหนือมีเรื่องอากาศหรือภัยพิบัติอะไรบ้าง"],
@@ -19,7 +20,7 @@
   Object.assign(window.SF.TEXT.en, {
     chatOpen: "Ask the news", chatClose: "Close chat", chatTitle: "Ask the news", chatSub: "Answers from the last 14 days, with sources",
     chatHello: "Hi. Ask about IT, cyber, finance or weather news from the last 14 days. I answer from stored stories and list my sources.",
-    chatNote: "Each question is answered on its own; earlier questions are not remembered.",
+    chatNote: "You can ask follow-ups: the last two questions are remembered. Clear the chat to start a new topic.",
     chatPlaceholder: "Type a question…", chatSend: "Send", chatClear: "Clear chat", chatSources: "Sources",
     chatChecking: "Checking you are not a bot…", chatShort: "Questions must be 5 to 300 characters",
     chatTry: ["Which vulnerabilities need patching first?", "Summarise this week's Thai economy news", "Any weather or disaster news in Northern Thailand?"],
@@ -114,6 +115,17 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  // The last two answered questions go with a new one, so follow-ups ("and the second one?") work.
+  function recentTurns() {
+    const turns = [];
+    for (let i = 1; i < messages.length; i++) {
+      const prev = messages[i - 1];
+      const m = messages[i];
+      if (prev.role === "user" && m.role === "bot" && !m.error) turns.push({ q: prev.text, a: m.text });
+    }
+    return turns.slice(-2);
+  }
+
   function push(m) {
     messages.push(m);
     store.save(messages);
@@ -138,6 +150,7 @@
     send.disabled = true;
     input.value = "";
     autosize();
+    const history = recentTurns();
     push({ role: "user", text: q });
     const dots = typing();
     try {
@@ -145,7 +158,7 @@
       const slow = setTimeout(() => { if (!token) dots.dataset.label = t("chatChecking"); }, 1500);
       const tok = await nextToken();
       clearTimeout(slow);
-      const res = await fetch("/api/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ q, token: tok }) });
+      const res = await fetch("/api/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ q, token: tok, history }) });
       useToken();
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || t("error"));

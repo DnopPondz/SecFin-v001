@@ -85,3 +85,24 @@ test("summariseTraffic folds one grouped query into totals and top lists", () =>
   assert.deepEqual(s.cities[0], { country: "TH", region: "Chiang Mai", city: "Chiang Mai", views: 5 });
   assert.equal(s.truncated, false);
 });
+
+test("validReport accepts known reasons and requires a note for Other", async () => {
+  const { validReport } = await import("../src/reports");
+  const id = "b".repeat(64);
+  assert.deepEqual(validReport({ id, reason: "fact", note: "  ตัวเลข  ผิด ", lang: "th" }), { id, reason: "fact", note: "ตัวเลข ผิด", lang: "th" });
+  assert.equal(validReport({ id, reason: "other", note: "" }), null);
+  assert.equal(validReport({ id, reason: "spam" }), null);
+  assert.equal(validReport({ id: "x", reason: "fact" }), null);
+  assert.equal(validReport({ id, reason: "link", note: "x".repeat(900) })!.note.length, 500);
+});
+
+test("chat history is trimmed to two turns and feeds the retrieval query", async () => {
+  const { validHistory, retrievalQuery, buildAskMessages } = await import("../src/ask");
+  const h = validHistory([{ q: "a", a: "1" }, { q: "ช่องโหว่ Fortinet", a: "มี 2 รายการ" }, { q: "c", a: "3" }, { q: 5, a: "x" }]);
+  assert.deepEqual(h.map((x) => x.q), ["ช่องโหว่ Fortinet", "c"]);
+  assert.equal(retrievalQuery("แล้วอันที่สองล่ะ", h), "c แล้วอันที่สองล่ะ");
+  assert.equal(retrievalQuery("q", []), "q");
+  const msg = buildAskMessages("แล้วอันที่สองล่ะ", [], h)[1].content;
+  assert.ok(msg.includes("Earlier in this conversation") && msg.includes("Q: c"));
+  assert.deepEqual(validHistory("nope"), []);
+});

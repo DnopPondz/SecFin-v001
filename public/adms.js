@@ -34,6 +34,10 @@
     q_vectorizeStored: "Vectorize stored dimensions",
     rl_api: "ทุก request ของ Worker", rl_search: "ค้นข่าว", rl_ask: "ถามข่าว (chatbot)", rl_login: "ใส่ PIN ADMS",
     perMin: (n) => `${n} ครั้ง/นาที`,
+    navOps: "สุขภาพและรายงาน", healthTitle: "สุขภาพระบบ", healthy: "ไม่พบปัญหา: บรีฟ บทสรุปละเอียด feed และโควตา Neuron ปกติ",
+    reportsTitle: "ข่าวที่ผู้อ่านแจ้งว่าผิด", noReports: "ยังไม่มีรายงาน", resolve: "แก้แล้ว",
+    reason_fact: "ข้อเท็จจริงไม่ตรงต้นฉบับ", reason_translation: "แปลหรือสรุปผิด", reason_link: "ลิงก์หรือรูปเสีย", reason_other: "อื่นๆ",
+    original: "ต้นฉบับ",
     updated: (d) => `ข้อมูลเมื่อ ${d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })} น. (เก็บไว้ 5 นาที)`,
     truncated: "ข้อมูลเยอะเกินเพดานการดึง ตัวเลขนี้เป็นค่าขั้นต่ำ",
   });
@@ -68,6 +72,10 @@
     q_vectorizeStored: "Vectorize stored dimensions",
     rl_api: "Every Worker request", rl_search: "Search", rl_ask: "Ask (chatbot)", rl_login: "ADMS PIN entry",
     perMin: (n) => `${n} per minute`,
+    navOps: "Health and reports", healthTitle: "System health", healthy: "No problems: brief, write-ups, feeds and Neuron budget are fine",
+    reportsTitle: "Stories readers reported as wrong", noReports: "No reports yet", resolve: "Resolved",
+    reason_fact: "Fact does not match", reason_translation: "Wrong translation or summary", reason_link: "Broken link or image", reason_other: "Other",
+    original: "Original",
     updated: (d) => `Data from ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })} (cached 5 minutes)`,
     truncated: "Too many rows to fetch; these totals are a lower bound",
   });
@@ -76,7 +84,7 @@
   const store = SF.store;
   let days = Number(store.get("admsDays")) || 7;
   let owner = store.get("admsOwner") === "1";
-  let data = { traffic: null, stories: null, quotas: null };
+  let data = { traffic: null, stories: null, quotas: null, health: null, reports: null };
 
   const fmt = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString(SF.lang === "th" ? "th-TH" : "en-US", { maximumFractionDigits: 1 }));
   const pct = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
@@ -233,10 +241,39 @@
     $("#error-list").replaceChildren(...errors.map((e) => el("li", {}, e)));
   }
 
+  function renderOps() {
+    const h = data.health;
+    if (h) {
+      $("#health").replaceChildren(h.problems.length
+        ? el("ul", { class: "problems" }, ...h.problems.map((p) => el("li", {}, p)))
+        : el("p", { class: "ok-line" }, t("healthy")));
+    }
+    const reports = data.reports;
+    if (!reports) return;
+    if (!reports.length) { $("#reports").replaceChildren(el("p", { class: "empty" }, t("noReports"))); return; }
+    const when = (ms) => new Date(ms).toLocaleString(SF.lang === "th" ? "th-TH" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
+    $("#reports").replaceChildren(el("ul", { class: "reports" }, ...reports.map((r) => {
+      const btn = el("button", { class: "btn ghost", type: "button" }, t("resolve"));
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        const res = await fetch(`/api/adms/reports/${r.id}/resolve`, { method: "POST" });
+        if (res.ok) { data.reports = data.reports.filter((x) => x.id !== r.id); renderOps(); } else btn.disabled = false;
+      });
+      return el("li", {},
+        el("div", {},
+          el("a", { href: `/story?id=${r.storyId}`, target: "_blank", rel: "noopener" }, r.title || r.storyId.slice(0, 12)),
+          el("div", { class: "meta" }, el("span", { class: "chip" }, t(`reason_${r.reason}`)), el("span", {}, when(r.createdAt)),
+            r.url ? el("a", { href: r.url, target: "_blank", rel: "noopener noreferrer" }, `${t("original")} ↗`) : null),
+          r.note ? el("p", { class: "report-note" }, r.note) : null),
+        btn);
+    })));
+  }
+
   function renderAll() {
     renderTraffic();
     renderStories();
     renderQuotas();
+    renderOps();
   }
 
   async function get(path) {
@@ -263,6 +300,8 @@
       renderStories();
       data.quotas = await get(`/api/adms/quotas${fresh ? "?fresh=1" : ""}`);
       renderQuotas();
+      [data.health, data.reports] = await Promise.all([get("/api/adms/health"), get("/api/adms/reports")]);
+      renderOps();
       $("#updated").textContent = t("updated", new Date(Math.min(...[data.traffic, data.stories, data.quotas].map((d) => d.cachedAt || Date.now()))));
     } catch (e) {
       if (e.signedOut) showLogin();

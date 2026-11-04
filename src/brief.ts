@@ -6,9 +6,16 @@ import { CATEGORIES, sourceById, type Category } from "./sources";
 import { thaiDate } from "./time";
 
 const ITEMS_PER_SECTION = 5;
+// The model ranks 7 so balancePicks can swap in global or Thai stories without a second AI call.
+const PICKS = 7;
 const WINDOW_MS = 30 * 60 * 60 * 1000; // a little over a day, so a late-night story is not lost
-// 5 bilingual items run to about 2,500 tokens; Thai is token-heavy, so leave headroom (unused tokens cost nothing).
-const MAX_TOKENS = 4000;
+// 7 bilingual items run to about 3,500 tokens; Thai is token-heavy, so leave headroom (unused tokens cost nothing).
+const MAX_TOKENS = 5600;
+
+// "Thai and global" in every section but weather: on 2026-11-04 the IT and finance briefs came out
+// all-Thai because Thai finance feeds outnumber the rest about three to one.
+const MIN_GLOBAL: Partial<Record<Category, number>> = { cyber: 2, it: 2, finance: 2 };
+const MIN_THAI: Partial<Record<Category, number>> = { cyber: 1, it: 1, finance: 1 };
 
 export interface Bilingual {
   th: string;
@@ -130,7 +137,10 @@ export function buildMessages(category: Category, candidates: Article[]): ChatMe
       role: "user",
       content: [
         `Section: ${SECTION_LABEL[category]}.`,
-        `Pick the ${ITEMS_PER_SECTION} most significant distinct stories below, most important first. Include Thai stories when they are relevant to Thailand.`,
+        `Pick the ${PICKS} most significant distinct stories below, most important first.`,
+        MIN_GLOBAL[category]
+          ? `The reader wants both Thai and world news: include at least ${MIN_GLOBAL[category]} global stories and at least ${MIN_THAI[category] ?? 1} Thai story when the list has them.`
+          : "Include Thai stories when they are relevant to Thailand.",
         "A story reported by several sources is usually more significant, but judge by impact.",
         "Items on the reader's watchlist concern products, vendors or companies the reader works with: include them unless they are trivial.",
         "For each: i (the item number), title_th and title_en (short headline), summary_th and summary_en (2 sentences),",
@@ -176,9 +186,31 @@ export function mergePicks(candidates: Article[], raw: unknown): BriefItem[] {
     if (!a || seen.has(p.i)) continue;
     seen.add(p.i);
     items.push(toItem(a, p));
-    if (items.length >= ITEMS_PER_SECTION) break;
+    if (items.length >= PICKS) break;
   }
   return items;
+}
+
+// Keep the model's order, but make sure the final 5 hold at least minGlobal global and minThai
+// Thai stories when the ranked picks contain them: the lowest-ranked picks of the over-represented
+// region make room for the best-ranked ones of the other.
+export function balancePicks(picks: BriefItem[], limit: number, minGlobal = 0, minThai = 0): BriefItem[] {
+  const ranked = picks.map((it, rank) => ({ it, rank }));
+  const chosen = ranked.slice(0, limit);
+  const spare = ranked.slice(limit);
+  const count = (region: BriefItem["region"]) => chosen.filter((c) => c.it.region === region).length;
+  const ensure = (region: BriefItem["region"], min: number, other: BriefItem["region"], otherMin: number) => {
+    while (count(region) < min) {
+      const incoming = spare.findIndex((c) => c.it.region === region);
+      if (incoming < 0 || count(other) <= otherMin) return;
+      const outIdx = chosen.map((c) => c.it.region).lastIndexOf(other);
+      chosen.splice(outIdx, 1);
+      chosen.push(spare.splice(incoming, 1)[0]);
+    }
+  };
+  ensure("global", minGlobal, "th", minThai);
+  ensure("th", minThai, "global", minGlobal);
+  return chosen.sort((a, b) => a.rank - b.rank).map((c) => c.it);
 }
 
 // All recent articles across every section, so a story's coverage counts sources in any section.
@@ -197,13 +229,15 @@ export async function aiSection(env: Env, category: Category, now: number): Prom
   const candidates = await candidatesFor(env, category, now);
   if (candidates.length === 0) return { items: [], neurons: 0, ai: false };
   const { data, neurons } = await runJson(env, buildMessages(category, candidates), JSON_SCHEMA, MAX_TOKENS, now);
-  return { items: mergePicks(candidates, data), neurons, ai: true };
+  const items = balancePicks(mergePicks(candidates, data), ITEMS_PER_SECTION, MIN_GLOBAL[category], MIN_THAI[category]);
+  return { items, neurons, ai: true };
 }
 
 // Without AI the page still shows the top stories, just untranslated and ranked by coverage and recency.
 export async function rawSection(env: Env, category: Category, now: number): Promise<Section> {
   const candidates = await candidatesFor(env, category, now);
-  return { items: candidates.slice(0, ITEMS_PER_SECTION).map((a) => toItem(a)), neurons: 0, ai: false };
+  const items = balancePicks(candidates.map((a) => toItem(a)), ITEMS_PER_SECTION, MIN_GLOBAL[category], MIN_THAI[category]);
+  return { items, neurons: 0, ai: false };
 }
 
 // CVE ids are read from the publisher's own headline and snippet, then checked against NVD.

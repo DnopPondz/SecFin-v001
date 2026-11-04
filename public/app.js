@@ -127,7 +127,7 @@
     SF.setEdition(edition);
     history.replaceState(null, "", edition ? `/?d=${edition}` : "/");
     try {
-      const res = await fetch(edition ? `/api/brief/${edition}` : "/api/brief/latest");
+      const [res] = await Promise.all([fetch(edition ? `/api/brief/${edition}` : "/api/brief/latest"), SF.sourcesReady]);
       brief = res.ok ? await res.json() : null;
     } catch {
       brief = null;

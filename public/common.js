@@ -8,6 +8,11 @@
       why: "ทำไมต้องสนใจ", raw: "หัวข้อต้นฉบับ (ยังไม่ได้สรุป)", live: "ล่าสุด", error: "โหลดข้อมูลไม่สำเร็จ",
       ago: (m) => (m < 60 ? `${Math.max(1, m)} นาทีที่แล้ว` : m < 1440 ? `${Math.floor(m / 60)} ชม. ที่แล้ว` : `${Math.floor(m / 1440)} วันที่แล้ว`),
       theme: "สลับโหมดสว่าง/มืด", lang: "EN", watchTip: "ตรงกับ watchlist", settings: "ตั้งค่า",
+      tier_official: "ทางการ", tier_mainstream: "สื่อหลัก", tier_specialist: "เฉพาะทาง",
+      tierHelp_official: "หน่วยงานรัฐ ทีม CERT หรือประกาศของผู้ผลิตเอง",
+      tierHelp_mainstream: "สำนักข่าวที่มีกองบรรณาธิการ",
+      tierHelp_specialist: "สื่อเฉพาะทาง ผู้สื่อข่าวอิสระ หรือข่าวตลาดปริมาณมาก",
+      sourcesLink: "แหล่งข่าวและวิธีสรุป",
     },
     en: {
       cyber: "Cyber Security", it: "IT", finance: "Finance", disaster: "Weather & Disasters",
@@ -16,6 +21,11 @@
       why: "Why it matters", raw: "Original headline (not summarized)", live: "Live", error: "Could not load",
       ago: (m) => (m < 60 ? `${Math.max(1, m)} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} d ago`),
       theme: "Toggle light/dark mode", lang: "ไทย", watchTip: "On your watchlist", settings: "Settings",
+      tier_official: "Official", tier_mainstream: "Mainstream", tier_specialist: "Specialist",
+      tierHelp_official: "Government agency, CERT or a vendor's own advisory",
+      tierHelp_mainstream: "News organisation with an editorial desk",
+      tierHelp_specialist: "Trade or niche outlet, independent reporter, or high-volume market news",
+      sourcesLink: "Sources and how we summarise",
     },
   };
   const SEV = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
@@ -69,9 +79,22 @@
     return el("div", { class: "kicker" }, t(cat), it.severity ? el("span", { class: `sev ${it.severity}` }, SEV[it.severity]) : null);
   }
 
+  // Source types (official, mainstream, specialist) from /api/sources. Pages await sourcesReady
+  // before their first render so every card gets its chip.
+  const sources = {};
+  const sourcesReady = fetch("/api/sources").then((r) => (r.ok ? r.json() : [])).then((list) => {
+    for (const s of list) sources[s.id] = s;
+  }).catch(() => {});
+
+  function tierChip(sourceId) {
+    const tier = sources[sourceId]?.tier;
+    return tier ? el("span", { class: `chip tier ${tier}`, title: t(`tierHelp_${tier}`) }, t(`tier_${tier}`)) : null;
+  }
+
   function meta(it) {
     return el("div", { class: "meta" },
       el("span", {}, it.sourceName),
+      tierChip(it.source),
       it.published ? el("span", {}, timeAgo(it.published)) : null,
       it.north ? el("span", { class: "chip north" }, t("north")) : null,
       ...(it.watch || []).map((w) => el("span", { class: "chip watch", title: t("watchTip") }, `★ ${w}`)),
@@ -272,6 +295,7 @@
 
   window.SF = {
     TEXT, t, el, link, media, kicker, meta, storyHref, timeAgo, store, initControls, startTicker, precache, trackView,
+    sources, sourcesReady, tierChip,
     get lang() { return lang; },
     onLang(fn) { listeners.push(fn); },
     setEdition(date) { edition = date || null; },

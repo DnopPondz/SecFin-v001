@@ -1,11 +1,11 @@
 // Offline reading and installability. Pages and the brief come from the network when it answers
 // within a few seconds and from the cache otherwise; scripts and styles are served from the cache
 // and refreshed in the background. Nothing user-specific or admin-only is ever cached.
-const CACHE = "sf-v2";
+const CACHE = "sf-v3";
 const SHELL = ["/", "/story", "/style.css", "/common.js", "/app.js", "/story.js", "/chat.js", "/manifest.webmanifest", "/icons/favicon.svg", "/icons/icon-192.png"];
 const NETWORK_TIMEOUT_MS = 4000;
 // Read-only APIs worth keeping for offline reading.
-const API_CACHED = /^\/api\/(brief\/|briefs$|story\/|widgets$|watch$|popular$)/;
+const API_CACHED = /^\/api\/(brief\/|briefs$|story\/|widgets$|watch$|popular$|sources$)/;
 const MAX_PRECACHE = 40;
 
 self.addEventListener("install", (event) => {

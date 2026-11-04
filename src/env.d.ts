@@ -17,6 +17,7 @@ interface Env {
   SEARCH_LIMITER: RateLimit;
   ASK_LIMITER: RateLimit;
   LOGIN_LIMITER: RateLimit;
+  REPORT_LIMITER: RateLimit;
   // 10-digit PIN for /adms (`wrangler secret put ADMS_PIN`). /adms login is disabled without it.
   ADMS_PIN?: string;
   // Secret for /api/admin/* routes (`wrangler secret put ADMIN_KEY`).

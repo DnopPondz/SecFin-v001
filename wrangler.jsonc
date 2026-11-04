@@ -48,7 +48,9 @@
     { "name": "SEARCH_LIMITER", "namespace_id": "2002", "simple": { "limit": 10, "period": 60 } },
     { "name": "ASK_LIMITER", "namespace_id": "2003", "simple": { "limit": 3, "period": 60 } },
     // /adms PIN attempts: 5 a minute per IP makes guessing 10^10 PINs impractical.
-    { "name": "LOGIN_LIMITER", "namespace_id": "2004", "simple": { "limit": 5, "period": 60 } }
+    { "name": "LOGIN_LIMITER", "namespace_id": "2004", "simple": { "limit": 5, "period": 60 } },
+    // "Report a mistake" on story pages: a D1 write each, so kept low.
+    { "name": "REPORT_LIMITER", "namespace_id": "2005", "simple": { "limit": 3, "period": 60 } }
   ],
   // Brief + 20 detailed stories cost about 1,400 Neurons; 5,000 (half the free 10,000) leaves room for
   // retries, embeddings, searches and questions.
