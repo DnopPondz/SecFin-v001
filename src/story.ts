@@ -203,7 +203,7 @@ export async function patchBriefImages(env: Env, date: string, images: Map<strin
   if (!row) return 0;
   const brief = JSON.parse(row.body) as Brief;
   let changed = 0;
-  for (const items of Object.values(brief.sections)) {
+  for (const items of [...Object.values(brief.sections), brief.midday?.items ?? []]) {
     for (const it of items) {
       const image = images.get(it.id);
       if (image && !it.image) {

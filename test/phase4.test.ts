@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { priorityOf } from "../src/brief";
+import { priorityOf, skipCovered } from "../src/brief";
 import { collapseClusters, type Article } from "../src/select";
 import { PROVINCES, normalizeSettings, watchMatcher } from "../src/settings";
 import { AIR_STATIONS, goldBahtThb, mergeAir, mergeFuel, mergeGold, parseAir, parseEia, parseFx, parseMeasurements, parsePtt, parseSensorList, pm25Level } from "../src/widgets";
@@ -38,6 +38,22 @@ test("a story is watched when any article in its cluster matched", () => {
   assert.equal(story.watch, "Fortinet");
   assert.equal(priorityOf("cyber", story), 3);
   assert.equal(priorityOf("cyber", article("z")), 0);
+});
+
+test("skipCovered keeps only stories the morning brief did not carry and that moved since", () => {
+  const since = 100;
+  const rows = [
+    article("morning", { cluster_id: "c1", published_at: 50 }),
+    article("morning-followup", { cluster_id: "c1", source: "krebs", published_at: 150 }), // same story, newer source
+    article("old", { cluster_id: "c2", published_at: 60 }),
+    article("revived-rep", { cluster_id: "c3", source: "cisa", published_at: 70 }), // credible rep is older...
+    article("revived-new", { cluster_id: "c3", published_at: 160 }), // ...but the story has news since
+    article("fresh", { published_at: 120 }),
+  ];
+  const stories = [rows[1], rows[2], rows[3], rows[5]];
+  const kept = skipCovered(rows, stories, { since, ids: ["morning"] }).map((a) => a.id);
+  assert.deepEqual(kept, ["revived-rep", "fresh"]);
+  assert.equal(skipCovered(rows, stories).length, 4);
 });
 
 test("pm25Level follows the Thai 24 h bands", () => {

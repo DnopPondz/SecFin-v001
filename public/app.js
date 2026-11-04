@@ -11,7 +11,7 @@
     results: (q) => `ผลการค้นหา "${q}"`, noHits: "ไม่พบข่าวที่ใกล้เคียง", searching: "กำลังค้นหา…", empty: "ยังไม่มีข่าวในหมวดนี้",
     none: "ยังไม่มีสรุปข่าว ระบบจะสรุปทุกเช้า 05:30 น.", clicks: (n) => `${n} คลิก`,
     footer: "สรุปโดย AI จากหัวข้อและเนื้อหาย่อของแหล่งข่าว รูปภาพเป็นของแหล่งข่าวต้นฉบับ โปรดอ่านต้นฉบับก่อนตัดสินใจ",
-    edition: (d) => `ฉบับวันที่ ${d}`,
+    edition: (d) => `ฉบับวันที่ ${d}`, midday: (time) => `อัปเดตรอบเที่ยง · ${time} น. ข่าวใหม่หลังบรีฟเช้า`,
     airTitle: "ฝุ่น PM2.5 ภาคเหนือ", airAvg: "เฉลี่ย 24 ชม.", airNow: (v) => `ล่าสุด ${v} µg/m³`, air24: "24 ชั่วโมงที่ผ่านมา",
     airSrc: (time) => `ค่าเฉลี่ย 24 ชม. จากสถานีของกรมควบคุมมลพิษ (Air4Thai) ผ่าน OpenAQ เกณฑ์สีตามกรมควบคุมมลพิษ · ข้อมูล ${time} น.`,
     airModel: "≈ ค่าประมาณจากแบบจำลอง CAMS (Open-Meteo) ใช้เมื่อสถานีไม่มีข้อมูล มักต่ำกว่าค่าจริง",
@@ -32,7 +32,7 @@
     results: (q) => `Results for "${q}"`, noHits: "No related stories found", searching: "Searching…", empty: "No stories in this section yet",
     none: "No brief yet. A new one is published every morning at 05:30 Thai time.", clicks: (n) => `${n} clicks`,
     footer: "AI summaries of publisher headlines and snippets. Images belong to the original publishers. Read the original before acting on it.",
-    edition: (d) => `Edition of ${d}`,
+    edition: (d) => `Edition of ${d}`, midday: (time) => `Midday update · ${time}, new since the morning brief`,
     airTitle: "PM2.5 in the North", airAvg: "24 h mean", airNow: (v) => `Latest ${v} µg/m³`, air24: "Last 24 hours",
     airSrc: (time) => `24 h means from Pollution Control Department stations (Air4Thai) via OpenAQ. Colours follow the department's bands · data ${time}`,
     airModel: "≈ CAMS model estimate (Open-Meteo), used when a station has no data; usually lower than measured",
@@ -64,6 +64,8 @@
   let widgets = null;
   let watchItems = [];
   const $ = (s) => document.querySelector(s);
+
+  const clock = (ms) => new Date(ms).toLocaleTimeString("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" });
 
   function headline(it, cat, tag) {
     return el(tag, { class: "headline" }, link(storyHref(it), it.title[SF.lang], "brief", cat, it.url));
@@ -122,6 +124,15 @@
       const [lead, ...rest] = items;
       body.replaceChildren(leadCard(lead, cat), el("div", { class: "list" }, ...rest.map((it) => rowCard(it, cat))));
     }
+    // 12:00 update: new stories since the morning, under the morning's stories of the same section.
+    const mid = brief?.midday;
+    if (mid?.items?.length) {
+      const body = $(`#${mid.category} .block-body`);
+      if (body.querySelector(".empty")) body.replaceChildren();
+      body.append(el("div", { class: "midday" },
+        el("h3", { class: "midday-head" }, t("midday", clock(mid.generatedAt))),
+        el("div", { class: "list" }, ...mid.items.map((it) => rowCard(it, mid.category)))));
+    }
     $("#notes").textContent = brief?.notes?.length ? brief.notes.join(" · ") : "";
   }
 
@@ -141,7 +152,7 @@
     if (brief) SF.trackView("home", "", brief.date);
     // Keep today's write-ups on the device for reading offline.
     if (brief && !edition) {
-      SF.precache(Object.values(brief.sections || {}).flat().filter((it) => it.id).map((it) => `/api/story/${it.id}`));
+      SF.precache([...Object.values(brief.sections || {}).flat(), ...(brief.midday?.items ?? [])].filter((it) => it.id).map((it) => `/api/story/${it.id}`));
     }
   }
 

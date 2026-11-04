@@ -70,7 +70,9 @@ app.get("/api/story/:id{[0-9a-f]{64}}", async (c) => {
     : null;
   const latest = edition ?? (await latestBrief(c.env));
   const brief = latest ? (JSON.parse(latest) as Brief) : null;
-  for (const [category, items] of Object.entries(brief?.sections ?? {})) {
+  const groups: [string, Brief["sections"][keyof Brief["sections"]]][] = Object.entries(brief?.sections ?? {});
+  if (brief?.midday) groups.push([brief.midday.category, brief.midday.items]);
+  for (const [category, items] of groups) {
     const item = items.find((it) => it.id === id);
     if (item) return c.json({ brief: { ...item, category } }, 200, { "Cache-Control": "no-store" });
   }
@@ -254,10 +256,11 @@ app.post("/api/admin/run", async (c) => {
   const task = c.req.query("task");
   if (task === "ingest") return c.json({ queued: await enqueueFeeds(c.env) });
   if (task === "brief") return c.json({ workflow: await startBrief(c.env, Date.now()) });
+  if (task === "midday") return c.json({ workflow: await startBrief(c.env, Date.now(), "midday") });
   if (task === "weekly") return c.json(await makeWeeklyPdf(c.env));
   if (task === "images") return c.json({ patched: await backfillBriefImages(c.env, thaiDate(Date.now())) });
   if (task === "widgets") return c.json(await refreshWidgets(c.env));
-  return c.json({ ok: false, error: "task must be ingest, brief, weekly, images or widgets" }, 400);
+  return c.json({ ok: false, error: "task must be ingest, brief, midday, weekly, images or widgets" }, 400);
 });
 
 app.get("/api/admin/settings", async (c) => {
@@ -371,10 +374,14 @@ app.get("/api/adms/quotas", async (c) => {
   return c.json(await cached(c.env, "quotas", c.req.query("fresh") === "1", () => quotas(c.env)), 200, { "Cache-Control": "no-store" });
 });
 
-async function startBrief(env: Env, now: number): Promise<string> {
-  const instance = await env.BRIEF_WORKFLOW.create({ id: `brief-${thaiDate(now)}-${now}`, params: { now } });
+async function startBrief(env: Env, now: number, edition?: "midday"): Promise<string> {
+  const instance = await env.BRIEF_WORKFLOW.create({ id: `${edition ?? "brief"}-${thaiDate(now)}-${now}`, params: { now, edition } });
   return instance.id;
 }
+
+// The midday update rides on the hourly cron (05:00 UTC = 12:00 Thai) instead of using one of the
+// account's 5 Cron Triggers. It sees feeds ingested up to the previous hour.
+const MIDDAY_UTC_HOUR = 5;
 
 export default {
   fetch: app.fetch,
@@ -388,6 +395,13 @@ export default {
       return;
     }
     console.log("queued feeds", await enqueueFeeds(env));
+    if (new Date(controller.scheduledTime).getUTCHours() === MIDDAY_UTC_HOUR) {
+      try {
+        console.log("midday workflow", await startBrief(env, controller.scheduledTime, "midday"));
+      } catch (err) {
+        console.error("midday:", err);
+      }
+    }
     try {
       await refreshWidgets(env, controller.scheduledTime);
     } catch (err) {

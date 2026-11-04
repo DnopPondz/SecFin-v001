@@ -10,6 +10,7 @@
       "ดึงหัวข่าวและเนื้อหาย่อจากแหล่งข่าวด้านล่างทุกชั่วโมง ไม่เก็บเนื้อข่าวเต็ม",
       "ข่าวเรื่องเดียวกันจากหลายแหล่งถูกรวมเป็นเรื่องเดียว และลิงก์ไปที่แหล่งที่น่าเชื่อถือที่สุด (ทางการ > สื่อหลัก > เฉพาะทาง)",
       "ทุกเช้า 05:30 น. AI (Gemma 4 บน Cloudflare Workers AI) เลือก 5 ข่าวต่อหมวด และแต่ละหมวดมีทั้งข่าวไทยและต่างประเทศ ยกเว้นหมวดอากาศที่ให้ความสำคัญกับภาคเหนือก่อน",
+      "เวลา 12:00 น. มีอัปเดตรอบเที่ยงเฉพาะหมวดการเงิน คัดจากข่าวที่ออกหลังบรีฟเช้าและยังไม่อยู่ในบรีฟเช้า",
       "AI สรุปจากเนื้อข่าวต้นฉบับเท่านั้น และถูกสั่งห้ามเพิ่มตัวเลข ชื่อ หรือข้อเท็จจริงที่ไม่มีในต้นฉบับ ลิงก์ทุกอันผูกกับข่าวจริง AI สร้างลิงก์เองไม่ได้",
       "เลข CVE คะแนน CVSS และสถานะ CISA KEV ดึงจากฐานข้อมูล NVD โดยตรง ไม่ได้ให้ AI เขียน",
       "กรองบทความที่ระบุว่าเป็น sponsored หรือประชาสัมพันธ์ และบทแนะนำซื้อขายหุ้นออก",
@@ -17,6 +18,8 @@
     ],
     colSource: "แหล่งข่าว", colType: "ประเภท", colRegion: "ภูมิภาค", colLang: "ภาษา", colNote: "หมายเหตุ",
     th: "ไทย", global: "ต่างประเทศ", langTh: "ไทย", langEn: "อังกฤษ",
+    panelsTitle: "แหล่งข้อมูลแผงข้าง", panelsHelp: "ตัวเลขในแผงข้างหน้าแรกดึงตรงจากแหล่งด้านล่าง ไม่ผ่าน AI ถ้าแหล่งใดดึงไม่ได้ จะแสดงค่าล่าสุดที่มีอยู่",
+    colData: "ข้อมูล", colFrom: "แหล่ง", colEvery: "ความถี่และข้อควรรู้",
   });
   Object.assign(window.SF.TEXT.en, {
     back: "← Front page", sourcesTitle: "Sources and how we summarise", howTitle: "How stories are summarised", tiersTitle: "Source types",
@@ -26,6 +29,7 @@
       "Headlines and short snippets are fetched from the sources below every hour. Full articles are never stored.",
       "The same story from several sources is merged into one, linked to the most credible source (official > mainstream > specialist).",
       "Every morning at 05:30 Thai time an AI model (Gemma 4 on Cloudflare Workers AI) picks 5 stories per section, mixing Thai and world news in every section except weather, which puts Northern Thailand first.",
+      "At 12:00 a midday update adds finance stories published after the morning brief that it did not already carry.",
       "The model summarises only from the original article and is told not to add numbers, names or facts that are not in it. Every link points to a real article; the model cannot create links.",
       "CVE ids, CVSS scores and CISA KEV status come straight from the NVD database, not from the model.",
       "Articles marked as sponsored or press releases, and stock buy/sell tips, are filtered out.",
@@ -33,10 +37,42 @@
     ],
     colSource: "Source", colType: "Type", colRegion: "Region", colLang: "Language", colNote: "Note",
     th: "Thailand", global: "Global", langTh: "Thai", langEn: "English",
+    panelsTitle: "Side panel data", panelsHelp: "The numbers in the front page's side panels come straight from the sources below, with no AI. When a source fails, the last value it gave stays on the page.",
+    colData: "Data", colFrom: "Source", colEvery: "Frequency and caveats",
   });
 
   const $ = (s) => document.querySelector(s);
   const CATS = ["cyber", "it", "finance", "disaster"];
+
+  // Mirrors the sources described at the top of src/widgets.ts.
+  const PANELS = [
+    { data: { th: "ฝุ่น PM2.5 ภาคเหนือ", en: "PM2.5, Northern Thailand" }, from: "กรมควบคุมมลพิษ (Air4Thai) ผ่าน OpenAQ", site: "https://explore.openaq.org",
+      note: { th: "ทุกชั่วโมง ค่าเฉลี่ย 24 ชม. จากสถานีในอำเภอเมืองของแต่ละจังหวัด จังหวัดที่สถานีไม่มีข้อมูลใช้ค่าประมาณจากแบบจำลอง CAMS (Open-Meteo) และมีเครื่องหมาย ≈", en: "Hourly. 24 h mean from the station in each provincial capital. A province whose station has no data shows a CAMS model estimate (Open-Meteo), marked ≈." } },
+    { data: { th: "ค่าเงิน USD, EUR, JPY", en: "USD, EUR, JPY rates" }, from: "ECB ผ่าน Frankfurter", site: "https://frankfurter.dev",
+      note: { th: "อัตราอ้างอิงของธนาคารกลางยุโรป ออกเฉพาะวันทำการ ไม่ใช่เรตซื้อขายของธนาคารไทย", en: "European Central Bank reference rates, working days only; not a Thai bank's buying or selling rate." } },
+    { data: { th: "ทองคำ", en: "Gold" }, from: "gold-api.com", site: "https://gold-api.com",
+      note: { th: "ราคา spot ต่อออนซ์ ราคาต่อบาททองคำเป็นค่าประมาณจาก spot และค่าเงิน ไม่ใช่ราคาสมาคมค้าทองคำ", en: "Spot price per ounce. The per baht-weight price is estimated from spot and the exchange rate, not the Gold Traders Association price." } },
+    { data: { th: "บิตคอยน์", en: "Bitcoin" }, from: "CoinGecko", site: "https://www.coingecko.com",
+      note: { th: "ทุกชั่วโมง พร้อมการเปลี่ยนแปลง 24 ชม.", en: "Hourly, with the 24 h change." } },
+    { data: { th: "น้ำมันดิบ Brent, WTI", en: "Brent and WTI crude" }, from: "U.S. EIA", site: "https://www.eia.gov",
+      note: { th: "ราคา spot ทุก 6 ชั่วโมง ข้อมูลช้ากว่าตลาดประมาณ 1 สัปดาห์", en: "Spot prices, every 6 hours; about a week behind the market." } },
+    { data: { th: "ราคาน้ำมันขายปลีก", en: "Thai pump prices" }, from: "PTT OR", site: "https://www.pttor.com",
+      note: { th: "ทุก 3 ชั่วโมง ราคาในกรุงเทพฯ ต่างจังหวัดอาจสูงกว่าเล็กน้อย", en: "Every 3 hours. Bangkok prices; provinces may be slightly higher." } },
+  ];
+
+  function renderPanels() {
+    const L = SF.lang;
+    $("#panels").replaceChildren(
+      el("h2", {}, t("panelsTitle")),
+      el("p", { class: "note" }, t("panelsHelp")),
+      el("div", { class: "table-wrap" }, el("table", { class: "adms-table" },
+        el("thead", {}, el("tr", {}, ...[t("colData"), t("colFrom"), t("colEvery")].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...PANELS.map((p) => el("tr", {},
+          el("td", {}, p.data[L]),
+          el("td", {}, el("a", { href: p.site, target: "_blank", rel: "noopener noreferrer" }, p.from)),
+          el("td", { class: "note-cell" }, p.note[L])))))),
+    );
+  }
 
   function render() {
     $("#how").replaceChildren(...t("how").map((s) => el("li", {}, s)));
@@ -62,5 +98,7 @@
 
   SF.initControls();
   SF.onLang(render);
+  SF.onLang(renderPanels);
   SF.sourcesReady.then(render);
+  renderPanels();
 })();

@@ -55,6 +55,25 @@ export interface Brief {
   neurons: number;
   sections: Record<Category, BriefItem[]>;
   notes: string[];
+  midday?: Midday; // added by the 12:00 update (from 2026-11-04)
+}
+
+// Midday update, added to the same day's brief at 12:00 Thai time at the owner's request
+// (2026-11-04): finance stories published since the morning brief that it did not carry.
+export const MIDDAY_CATEGORY: Category = "finance";
+
+export interface Midday {
+  generatedAt: number;
+  category: Category;
+  items: BriefItem[];
+  neurons: number;
+  ai: boolean;
+}
+
+// Stories to leave out of an update: anything before `since` and any story (cluster) already in the brief.
+export interface Skip {
+  since: number;
+  ids: string[];
 }
 
 const SECTION_LABEL: Record<Category, string> = {
@@ -214,19 +233,38 @@ export function balancePicks(picks: BriefItem[], limit: number, minGlobal = 0, m
 }
 
 // All recent articles across every section, so a story's coverage counts sources in any section.
-async function candidatesFor(env: Env, category: Category, now: number): Promise<Article[]> {
+async function candidatesFor(env: Env, category: Category, now: number, skip?: Skip): Promise<Article[]> {
   const { results } = await env.DB.prepare(
     "SELECT id, url, source, category, region, lang, title, snippet, published_at, cluster_id, image, watch FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT 1000",
   )
     .bind(now - WINDOW_MS)
     .all<Article>();
-  const stories = collapseClusters(results).filter((a) => a.category === category);
+  const stories = skipCovered(results, collapseClusters(results).filter((a) => a.category === category), skip);
   return pickCandidates(stories.map((a) => ({ ...a, priority: priorityOf(category, a) })));
 }
 
+// Drops stories with nothing published since skip.since and stories whose cluster holds an article
+// already in the brief (a cluster's representative can change when a more credible source picks
+// the story up, and it is not always the newest article).
+export function skipCovered(rows: Article[], stories: Article[], skip?: Skip): Article[] {
+  if (!skip) return stories;
+  const ids = new Set(skip.ids);
+  const covered = new Set<string>();
+  const newest = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.cluster_id) continue;
+    if (ids.has(r.id)) covered.add(r.cluster_id);
+    newest.set(r.cluster_id, Math.max(newest.get(r.cluster_id) ?? 0, r.published_at));
+  }
+  return stories.filter((a) => {
+    if (ids.has(a.id) || (a.cluster_id && covered.has(a.cluster_id))) return false;
+    return (a.cluster_id ? (newest.get(a.cluster_id) ?? a.published_at) : a.published_at) >= skip.since;
+  });
+}
+
 // Throws when the AI call fails so the Workflow step can retry it; rawSection is the fallback.
-export async function aiSection(env: Env, category: Category, now: number): Promise<Section> {
-  const candidates = await candidatesFor(env, category, now);
+export async function aiSection(env: Env, category: Category, now: number, skip?: Skip): Promise<Section> {
+  const candidates = await candidatesFor(env, category, now, skip);
   if (candidates.length === 0) return { items: [], neurons: 0, ai: false };
   const { data, neurons } = await runJson(env, buildMessages(category, candidates), JSON_SCHEMA, MAX_TOKENS, now);
   const items = balancePicks(mergePicks(candidates, data), ITEMS_PER_SECTION, MIN_GLOBAL[category], MIN_THAI[category]);
@@ -234,8 +272,8 @@ export async function aiSection(env: Env, category: Category, now: number): Prom
 }
 
 // Without AI the page still shows the top stories, just untranslated and ranked by coverage and recency.
-export async function rawSection(env: Env, category: Category, now: number): Promise<Section> {
-  const candidates = await candidatesFor(env, category, now);
+export async function rawSection(env: Env, category: Category, now: number, skip?: Skip): Promise<Section> {
+  const candidates = await candidatesFor(env, category, now, skip);
   const items = balancePicks(candidates.map((a) => toItem(a)), ITEMS_PER_SECTION, MIN_GLOBAL[category], MIN_THAI[category]);
   return { items, neurons: 0, ai: false };
 }
@@ -265,4 +303,27 @@ export async function saveBrief(env: Env, brief: Brief): Promise<void> {
   await env.DB.prepare("INSERT OR REPLACE INTO briefs (date, created_at, body) VALUES (?, ?, ?)").bind(brief.date, brief.generatedAt, body).run();
   // KV keeps the hot "today" read off D1; one write per brief stays far under the 1,000/day KV limit.
   await env.CACHE.put("brief:latest", body);
+}
+
+// What the midday update must not repeat: the morning brief's stories, and anything it already saw.
+// Null when there is no brief for that Thai date yet.
+export async function middaySkip(env: Env, date: string): Promise<Skip | null> {
+  const row = await env.DB.prepare("SELECT body FROM briefs WHERE date = ?").bind(date).first<{ body: string }>();
+  if (!row) return null;
+  const brief = JSON.parse(row.body) as Brief;
+  return { since: brief.generatedAt, ids: Object.values(brief.sections).flat().map((it) => it.id) };
+}
+
+// Adds the midday update to the day's saved brief (one D1 write, one KV write when it is the latest).
+export async function saveMidday(env: Env, date: string, midday: Midday): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT body FROM briefs WHERE date = ?").bind(date).first<{ body: string }>();
+  if (!row) return false;
+  const brief = JSON.parse(row.body) as Brief;
+  brief.midday = midday;
+  brief.neurons += midday.neurons;
+  const body = JSON.stringify(brief);
+  await env.DB.prepare("UPDATE briefs SET body = ? WHERE date = ?").bind(body, date).run();
+  const latest = await env.DB.prepare("SELECT date FROM briefs ORDER BY date DESC LIMIT 1").first<{ date: string }>();
+  if (latest?.date === date) await env.CACHE.put("brief:latest", body);
+  return true;
 }
